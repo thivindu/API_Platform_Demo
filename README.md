@@ -4,8 +4,14 @@ A walkthrough of the WSO2 API Platform end to end: APIs land in the gateway, get
 
 ## Prerequisites
 
-This demo assumes the platform is already set up and the `public` catalog is already seeded. Before
-starting, the following must be true:
+**No platform yet?** [`setup.md`](setup.md) builds the whole thing from a bare machine —
+downloads, configuration, and every component in order — and ends exactly where this
+walkthrough begins. Everything it needs is in this repository: the config templates under
+[`setup/resources/`](setup/resources), the demo artifacts, and these scripts. The component
+wiring is drawn in [`architecture.md`](architecture.md).
+
+This walkthrough assumes the platform is already set up and the `public` catalog is already seeded.
+Before starting, the following must be true:
 
 - WSO2 IS is configured with the root service provider (`scripts/setup_idp.sh` has been run), and you
   have its `ROOT_APP_CLIENT_ID` / `ROOT_APP_CLIENT_SECRET` / `ROOT_APP_ID`.
@@ -280,4 +286,8 @@ REST APIs. Nothing in this demo needs it — it is there for driving the Publish
 
 `API-Platform-Demo-Gateway-Management-Postman-Collection.json` folder
 `1. Seed the public catalog (prerequisite)` deploys the five prerequisite artifacts, for rebuilding an
-environment from scratch. `./scripts/seed-gateway.sh` does the same from the command line.
+environment from scratch. `./scripts/seed-gateway.sh` does the same from the command line — except for
+AgentChatAPI: the `public` bundle carries only its portal half, so the script deploys four artifacts and
+the fifth needs its gateway definition named explicitly,
+`./scripts/seed-gateway.sh agent-chat-rate-limiting/AgentChatAPI-v1.0.yaml` (which is the file request
+`1c` embeds).
