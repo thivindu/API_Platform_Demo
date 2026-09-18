@@ -2,7 +2,7 @@
 
 Build the whole demo from a bare machine: download the distributions, configure every
 component, wire them together, and arrive at the point where
-[`API_Platform_Demo/README.md`](../API_Platform_Demo/README.md).
+[`README.md`](README.md).
 
 **Conventions**
 
@@ -11,6 +11,15 @@ component, wire them together, and arrive at the point where
 - Commands are Bash, run on the demo machine itself.
 - Every TLS endpoint here is **self-signed**, so `curl` always gets `-k` and Postman needs
   SSL verification turned off.
+
+**Verified.** Steps 1–9 of this guide were run start to finish on a clean macOS machine on
+2026-09-18, from the distribution zips, and each verification command in them passed. Step 10
+(tenant onboarding) fails on a *freshly installed* IS 7.3.0 for the reason documented in that
+step; it works against an IS whose organizations predate per-organization signing keys. The
+findings from that run are folded into the steps below. One difference worth knowing: that
+run used the stock `ghcr.io/wso2/api-platform/api-portal:1.0.0` image, not the custom
+`ghcr.io/lasanthas/api-portal:1.0.0` this demo normally runs — the portal started and served
+the OIDC redirect on both, but nothing past Step 9 has been verified on the stock image.
 
 **Official documentation.** Each step links the WSO2 page that covers it. The three product
 doc sets are:
@@ -42,7 +51,7 @@ doc sets are:
 15. [Placeholder reference](#placeholder-reference)
 16. [Full verification checklist](#full-verification-checklist)
 17. [Troubleshooting](#troubleshooting)
-18. [Config completeness audit — what `demo/resources` does and does not cover](#config-completeness-audit)
+18. [Config completeness audit — what `setup/resources` does and does not cover](#config-completeness-audit)
 19. [Starting over](#starting-over)
 
 ---
@@ -103,7 +112,13 @@ keys — those come from the portal.
 [Portal overview](https://wso2.com/api-platform/docs/api-portal/1.0.0/overview/) · [Secured API end to end](https://wso2.com/api-platform/docs/api-portal/1.0.0/tutorials/secured-api-end-to-end/) · [Webhooks](https://wso2.com/api-platform/docs/api-portal/1.0.0/admin-settings/webhook-integration/)
 
 A Node.js app in Docker on **9543**. Developers browse APIs and MCP servers, create
-applications, subscribe to plans, and generate API keys. It is multi-tenant: each org has its
+applications, subscribe to plans, and generate API keys.
+
+> **This demo runs a custom portal image — `ghcr.io/lasanthas/api-portal:1.0.0`**, not the
+> `ghcr.io/wso2/api-platform/api-portal:1.0.0` that the distribution's own
+> `docker-compose.yaml` names. The ready-made Compose file for it is in this repo at
+> [`setup/resources/api-portal/docker-compose.yaml`](setup/resources/api-portal/docker-compose.yaml),
+> which Step 9.3 drops into place. It is multi-tenant: each org has its
 own catalog at `/api-portal/<org>/views/default`.
 
 It ships with a sidecar called **Platform API** for local username/password login. **This demo
@@ -189,6 +204,13 @@ runs with **port offset 1** (9444) throughout this guide, leaving 9443 to API Ma
 
 ### Prerequisites
 
+> **The installation path must contain no spaces.** Unpack the distributions somewhere like
+> `~/demo`, never `~/My Demo/…`. WSO2 Carbon builds internal `jar:file:` URLs from
+> `CARBON_HOME`; a space becomes `+`, the JDK's jar handler does not decode it back, and
+> `oauth2.war` silently fails to deploy — which you discover three steps later as a **404 from
+> `/oauth2/token`** and no DCR token. If the path you must use has a space, symlink it:
+> `ln -s "/path/with space/setup" ~/demo-setup` and start the Java servers from the symlink.
+
 Have these in place before you start. Install them however your platform normally does.
 
 | Tool | Version | Why |
@@ -224,17 +246,19 @@ ls ~/demo/setup/
 # wso2am-4.7.0  wso2apip-api-gateway-1.2.0  wso2apip-api-portal-1.0.0  wso2is-7.3.0
 ```
 
-**The two demo repositories:**
+**The two repositories.** You are reading this from the first one; clone it to `~` if you
+have not already, and clone the mediator into the setup directory:
 
 ```bash
-cd ~/demo/setup
-git clone https://github.com/thivindu/api-portal-platform-gateway-subscription-mediator.git
-cd ~
-git clone https://github.com/thivindu/API_Platform_Demo.git
+cd ~ && git clone https://github.com/thivindu/API_Platform_Demo.git
+cd ~/demo/setup && git clone https://github.com/thivindu/api-portal-platform-gateway-subscription-mediator.git
 ```
 
-`API_Platform_Demo` holds the demo artifacts, the onboarding scripts and the two Postman
-collections; everything in it runs from this machine.
+`API_Platform_Demo` (this repo) holds the demo artifacts, the config files under
+`setup/resources/`, the onboarding scripts and the two Postman collections. Every command
+below that starts `./scripts/...` runs from its root — written here as `~/API_Platform_Demo`.
+The mediator is a separate public repo because it is a standalone service, not a demo
+artifact.
 
 **The `ap` CLI** (only needed for Step 3, the custom-policy build):
 
@@ -250,19 +274,21 @@ ap version                          # expect v0.9.x
 macOS: swap in `ap-darwin-arm64-v0.9.1.zip` (Apple silicon) or `ap-darwin-amd64-v0.9.1.zip`.
 Step 3 also shows a path that needs no CLI at all.
 
-### Config files that ship with this demo
+### Config files that ship with this repo
 
-`demo/resources/` holds the four config files this deployment actually ran with. They are
-your starting point, not a drop-in — see the [audit](#config-completeness-audit) for what they
-cover and what you must add.
+`setup/resources/` in this repository holds the six config files this deployment runs with,
+with every secret replaced by a placeholder. They are your starting point — see the
+[audit](#config-completeness-audit) for what they cover and what you still have to add.
+Paths on the left are relative to this repository; paths on the right to `~/demo/setup/`.
 
-| File | Goes to |
+| File in this repo | Copy to |
 |---|---|
-| `resources/is/deployment.toml` | `setup/wso2is-7.3.0/repository/conf/deployment.toml` |
-| `resources/gateway/config.toml` | `setup/wso2apip-api-gateway-1.2.0/configs/config.toml` |
-| `resources/gateway/api-platform.env` | `setup/wso2apip-api-gateway-1.2.0/api-platform.env` |
-| `resources/api-portal/config.toml` | `setup/wso2apip-api-portal-1.0.0/configs/config.toml` |
-| `resources/subscription-mediator/.env` | `setup/api-portal-platform-gateway-subscription-mediator/subscription-mediator/.env` |
+| `setup/resources/is/deployment.toml` | `wso2is-7.3.0/repository/conf/deployment.toml` |
+| `setup/resources/gateway/config.toml` | `wso2apip-api-gateway-1.2.0/configs/config.toml` |
+| `setup/resources/gateway/api-platform.env` | `wso2apip-api-gateway-1.2.0/api-platform.env` |
+| `setup/resources/api-portal/config.toml` | `wso2apip-api-portal-1.0.0/configs/config.toml` |
+| `setup/resources/api-portal/docker-compose.yaml` | `wso2apip-api-portal-1.0.0/docker-compose.yaml` |
+| `setup/resources/subscription-mediator/.env` | `api-portal-platform-gateway-subscription-mediator/subscription-mediator/.env` |
 
 ---
 
@@ -315,7 +341,9 @@ Add the four names to `setup/wso2apip-api-gateway-1.2.0/docker-compose.yaml`, un
       - "is.wso2.com:<DOCKER_HOST_ADDR>"
 ```
 
-And to `setup/wso2apip-api-portal-1.0.0/docker-compose.yaml` under `api-portal`:
+The portal's compose file has **no `extra_hosts` block at all** — add the whole thing to
+`setup/wso2apip-api-portal-1.0.0/docker-compose.yaml` under `api-portal`, alongside its
+`profiles:` line:
 
 ```yaml
     extra_hosts:
@@ -410,6 +438,21 @@ Open `https://am.wso2.com:9443/admin` → **Gateways** → **Add Gateway**, choo
 | URL | `https://platform.gw.wso2.com:8443` | The gateway's **traffic** endpoint, shown to developers |
 | Version | `1.2.0` | Only appears if `[apim.platform_gateway] versions` was picked up |
 | Visibility | Public | |
+
+**Headless alternative.** The same registration over the Admin REST API, which is what to use
+when scripting the setup (needs the token from Step 4.1's DCR app, so run that first):
+
+```bash
+curl -sk -X POST "https://am.wso2.com:9443/api/am/admin/v4/gateways" \
+  -H "Authorization: Bearer <APIM_ADMIN_TOKEN>" -H 'Content-Type: application/json' \
+  -d '{"name":"<GATEWAY_NAME>",
+       "displayName":"API Platform Gateway",
+       "vhost":"https://platform.gw.wso2.com:8443"}'
+```
+
+The API takes exactly `name`, `displayName` and `vhost` — there is no `version` or
+`visibility` field, unlike the UI form above. The `201` response carries `registrationToken`
+and `isActive: false`.
 
 On save the Admin portal shows a **registration token — once**. Copy it now into a scratch
 file as `<REGISTRATION_TOKEN>`. It is stored only as a hash and can never be shown again; the
@@ -583,7 +626,7 @@ Do not delete or edit `.env` afterwards: the data lives in volumes named after
 ### 4.3 Fill in `api-platform.env`
 
 `setup.sh` leaves the control-plane settings blank. Complete the file
-(`resources/gateway/api-platform.env` in this repo is the same file with the values stripped):
+(`setup/resources/gateway/api-platform.env` in this repo is the same file with the values stripped):
 
 ```bash
 # --- written by setup.sh, leave alone ---
@@ -720,22 +763,25 @@ portal, and they are never invoked during the demo. Leave those ports empty.
 For a **real** MCP demo, run any MCP server on 7101/7102 and re-push the two `mcp-proxies`
 definitions.
 
-### 5.2 Fix the hard-coded upstream addresses
+### 5.2 Check the upstream addresses
 
-**Do not skip this.** Some artifacts carry the original demo host's IP baked in:
+Every artifact in this repo points its upstreams at `host.docker.internal`, which the gateway
+containers resolve through the `extra_hosts` entries from [Section 3](#3-hostnames-and-name-resolution).
+**On Docker Engine for Linux there is nothing to change here.** On Docker Desktop, where that
+name does not reach the host, substitute the machine's LAN IP:
 
-| File | Contains | Change to |
-|---|---|---|
-| `API_Platform_Demo/agent-chat-rate-limiting/AgentChatAPI-v1.0.yaml` | `url: http://77.112.16.220:7094` | `http://host.docker.internal:7094` on Linux, `http://<MACHINE_IP>:7094` on Docker Desktop |
-| `API_Platform_Demo/API-Platform-Demo-Gateway-Management-Postman-Collection.json` | `77.112.16.220` in the AgentChat and OrderManagement request bodies (ports 7093/7094/7095/7096) | the same substitution |
-| `API_Platform_Demo/order-management-dynamic-routing/OrderManagementAPI-v1.0.yaml` | `http://host.docker.internal:7093/7095/7096` | already right on Linux; on Docker Desktop use `<MACHINE_IP>` |
+| File | Upstreams |
+|---|---|
+| `agent-chat-rate-limiting/AgentChatAPI-v1.0.yaml` | `http://host.docker.internal:7094` |
+| `order-management-dynamic-routing/OrderManagementAPI-v1.0.yaml` | `http://host.docker.internal:7093` / `:7095` / `:7096` |
+| `API-Platform-Demo-Gateway-Management-Postman-Collection.json` | the same addresses, embedded in its create/update bodies |
 
-Sweep them all:
+Sweep them in one go if you need the LAN-IP form:
 
 ```bash
 cd ~/API_Platform_Demo
-grep -rn "77\.112\.16\.220" . | grep -v '\.git/'
-grep -rln "77\.112\.16\.220" . | grep -v '\.git/' | xargs sed -i 's/77\.112\.16\.220/host.docker.internal/g'
+grep -rln "host\.docker\.internal" --include='*.yaml' --include='*.json' . | grep -v '\.git/' \
+  | xargs sed -i '' 's/host\.docker\.internal/<MACHINE_IP>/g'     # GNU sed: drop the '' after -i
 ```
 
 Remember the address has to be reachable **from the gateway-runtime container**:
@@ -766,7 +812,10 @@ collection variables (`gateway_mgmt_url` = `http://platform.gw.wso2.com:9090`,
 `admin_username`, `admin_password`), and run folder
 **`1. Seed the public catalog (prerequisite)`** (requests 1a–1e).
 
-**Or from the command line** — same five artifacts, same management API:
+**Or from the command line.** Note that the script deploys **four**, not five: the `public`
+bundle's `agent-chat-rate-limiting/` directory holds only `README.md`, `api-portal/` and
+`mock-services/` — it has no gateway YAML. AgentChatAPI's gateway half lives at the repo root,
+and Postman's request `1c` embeds that same file.
 
 ```bash
 cd ~/API_Platform_Demo
@@ -775,12 +824,21 @@ GW_USER='<GW_ADMIN_USERNAME>' GW_PASS='<GW_ADMIN_PASSWORD>' \
   ./scripts/seed-gateway.sh
 ```
 
+Then deploy AgentChatAPI explicitly, from the root bundle:
+
+```bash
+GW_MGMT_URL=http://platform.gw.wso2.com:9090 \
+GW_USER='<GW_ADMIN_USERNAME>' GW_PASS='<GW_ADMIN_PASSWORD>' \
+  ./scripts/seed-gateway.sh agent-chat-rate-limiting/AgentChatAPI-v1.0.yaml
+```
+
 `seed-gateway.sh` walks `artifacts/via-script/public/{apis,mcps}/*/`, sends every `kind:
 RestApi` to `/rest-apis` and every `kind: Mcp` to `/mcp-proxies`, and PUTs anything that
-already exists. `DRY_RUN=1` lists without deploying.
+already exists. Named files on the command line are deployed instead of that scan.
+`DRY_RUN=1` lists without deploying.
 
 **OrderManagementAPI is deliberately left out** — it is deployed live during the demo
-(`API_Platform_Demo/README.md` Step 2).
+(`README.md` Step 2).
 
 ### 5.4 Verify
 
@@ -791,9 +849,13 @@ curl -s -u '<GW_ADMIN_USERNAME>:<GW_ADMIN_PASSWORD>' \
   http://platform.gw.wso2.com:9090/api/management/v1/mcp-proxies | jq '.mcpProxies[].metadata.name'
 ```
 
-Then open `https://am.wso2.com:9443/publisher` — **all five must be listed there too**. That
-is the DP→CP push working; if they are not there, the OAuth2 client from Step 4.1 is wrong or
-missing. `409 Conflict` on a create just means it is already deployed — use the matching
+Then open `https://am.wso2.com:9443/publisher` — **the three REST APIs must be listed there
+too**. That is the DP→CP push working; if they are not there, the OAuth2 client from Step 4.1
+is wrong or missing.
+
+The **two MCP proxies do not appear in the Publisher** — `/api/am/publisher/v4/mcp-servers`
+stays empty. Only REST APIs sync up; the MCP proxies live on the gateway and reach the portal
+through its own catalog in Step 10. That is expected, not a fault. `409 Conflict` on a create just means it is already deployed — use the matching
 `3x. Update ...` request instead.
 
 ---
@@ -830,7 +892,7 @@ SM_GATEWAY_BASE_URL=http://platform.gw.wso2.com:9090/api/management/v1
 EOF
 ```
 
-(The same four keys, empty, are in `resources/subscription-mediator/.env`.)
+(The same four keys, empty, are in `setup/resources/subscription-mediator/.env`.)
 
 `SM_GATEWAY_BASE_URL` must be reachable **from the mediator container**, which — unlike the
 gateway and portal stacks — sets no `extra_hosts` at all, so `platform.gw.wso2.com` does not
@@ -881,12 +943,14 @@ staying at `0`.
 
 ### 7.1 Configure
 
+Run from your clone of this repository:
+
 ```bash
-cp ~/"Desktop/WK Demo"/demo/resources/is/deployment.toml \
+cp setup/resources/is/deployment.toml \
    ~/demo/setup/wso2is-7.3.0/repository/conf/deployment.toml
 ```
 
-(Adjust the source path to wherever this repo sits.) What it sets:
+What it sets:
 
 ```toml
 [server]
@@ -1030,7 +1094,7 @@ through IS — but save it anyway.
 
 ### 9.2 Switch the portal to IdP mode
 
-Copy `resources/api-portal/config.toml` from this repo over
+Copy `setup/resources/api-portal/config.toml` from this repo over
 `configs/config.toml`, then fill in the `[api_portal.auth.idp]` block with Step 8's values:
 
 ```toml
@@ -1078,29 +1142,40 @@ display_name = "Default"
 dispatch_all_organizations = true                    # every org's events reach the mediator
 ```
 
-### 9.3 Adjust `docker-compose.yaml`
+### 9.3 Use this repo's `docker-compose.yaml`
 
-Two edits the shipped file does not have, both needed by this demo:
+The portal's Compose file needs four changes from what the distribution ships, so this repo
+carries a finished copy — drop it in place of the pack's own:
 
-1. **Trust IS's self-signed certificate.** The portal container calls `token_url`/`jwks_url`
-   over HTTPS and will refuse an untrusted cert. Under the `api-portal` service:
+```bash
+cp setup/resources/api-portal/docker-compose.yaml \
+   ~/demo/setup/wso2apip-api-portal-1.0.0/docker-compose.yaml
+```
+
+What it does differently, and why each matters:
+
+| Change | Why |
+|---|---|
+| `image: ghcr.io/lasanthas/api-portal:1.0.0` | **The custom portal build this demo runs**, in place of the stock `ghcr.io/wso2/api-platform/api-portal:1.0.0` the distribution ships. Compose pulls it on first start |
+| The `platform-api` service is gone | In IdP mode the local-auth sidecar is unused. Deleting the service also removes the `depends_on: platform-api` that otherwise makes Compose reject the project once `platform-api` is out of `COMPOSE_PROFILES` |
+| `NODE_TLS_REJECT_UNAUTHORIZED: "0"` | The portal container calls `token_url`/`jwks_url` over HTTPS and would refuse IS's self-signed certificate. It disables TLS verification for the whole Node process — fine for a demo, never for production; mount your CA instead |
+| `APIP_AP_LOGGING_LEVEL: "debug"` | Logs the decoded ID-token claims, which is what you read when a login succeeds but carries no roles |
+
+Two things it does **not** do, which you still have to:
+
+1. Set `COMPOSE_PROFILES=api-portal` in `.env` (it ships as `api-portal,platform-api`, and the
+   removed service must not be listed).
+2. Add `is.wso2.com` to `extra_hosts` — the file maps only `host.docker.internal`, and the
+   portal container has to resolve IS by name to reach `token_url` and `jwks_url`:
 
    ```yaml
-       environment:
-         APIP_AP_SERVER_PORT: ${APIP_AP_SERVER_PORT:-9543}
-         NODE_TLS_REJECT_UNAUTHORIZED: "0"
-         APIP_AP_LOGGING_LEVEL: "debug"     # optional: logs the decoded ID-token claims
+       extra_hosts:
+         - "host.docker.internal:<DOCKER_HOST_ADDR>"
+         - "is.wso2.com:<DOCKER_HOST_ADDR>"
    ```
 
-   `NODE_TLS_REJECT_UNAUTHORIZED: "0"` disables TLS verification for the whole Node process.
-   Acceptable for a demo on self-signed certs; for anything real, mount your CA instead.
-
-2. **Leave Platform API off.** `.env` should read `COMPOSE_PROFILES=api-portal` — no
-   `platform-api`. In IdP mode the sidecar is dead weight. (The reference deployment went
-   further and deleted the service from the Compose file; leaving it unlisted in
-   `COMPOSE_PROFILES` has the same effect.)
-
-Also add the `extra_hosts` entry from [Section 3](#3-hostnames-and-name-resolution).
+   On Docker Engine for Linux `host-gateway` is the value for both; on Docker Desktop use the
+   machine's LAN IP. See [Section 3](#3-hostnames-and-name-resolution).
 
 ### 9.4 Start and verify
 
@@ -1148,6 +1223,41 @@ From `API_Platform_Demo`.
 > [Configure webhooks](https://wso2.com/api-platform/docs/api-portal/1.0.0/admin-settings/webhook-integration/)
 > for the subscriber it registers.
 
+### Before you run it: the per-organization signing key
+
+**On a freshly installed WSO2 IS 7.3.0 this step fails, and the cause is not obvious.**
+
+`onboard-tenant.sh` seeds the org's portal catalog using a token minted at
+`https://is.wso2.com:9444/o/<orgId>/oauth2/token`. IS signs tokens issued at that
+org-scoped endpoint with the **organization's own key**, not the root key — and publishes
+it at the organization's own JWKS endpoint:
+
+```bash
+curl -sk https://is.wso2.com:9444/oauth2/jwks              | jq -r '.keys[].kid'
+curl -sk https://is.wso2.com:9444/o/<orgId>/oauth2/jwks    | jq -r '.keys[].kid'
+# two different kids — the token carries the second one
+```
+
+`[api_portal.auth.idp]` takes a single static `jwks_url`, so the portal cannot verify that
+token and every upload fails:
+
+```
+[error] Bearer token validation failed {"error":"no applicable key found in the JSON Web Key Set"}
+FAIL weather-api-v1.0  (401: Authentication required)
+```
+
+Pointing `jwks_url` at one org's JWKS gets past the signature and into `403 Forbidden` on
+every call, read and write alike — and it cannot serve `public`, `acme` and `railco` at once
+anyway, since each has its own key.
+
+Browser login is **not** affected: that runs the authorization-code flow against the *root*
+`/oauth2/authorize`, so the resulting token is signed with the root key.
+
+If you hit this, check how your IS was provisioned before changing anything — an instance
+whose database predates per-organization signing keys (e.g. one upgraded in place from IS
+7.1.0) keeps signing org tokens with the root key, which is why an existing deployment can
+work where a fresh install does not.
+
 ### Run it
 
 ```bash
@@ -1170,7 +1280,7 @@ IS_INTERNAL_URL=https://is.wso2.com:9444 \
 | `ORG_NAME` | The IS organization name. IS **never frees a deleted org's name**, so a re-onboard after cleanup needs a new one (`ORG_NAME=acme-demo SAMPLE_DIR=acme`) |
 | `SAMPLE_DIR` | Which `artifacts/via-script/` bundle to seed from. Defaults to `ORG_NAME` |
 | `WEBHOOK_SECRET` | **Must equal the mediator's `SM_WEBHOOK_SECRET`** |
-| `WEBHOOK_TARGET_URL` | **Set this explicitly.** The script's built-in default is the original demo host's IP and will silently point your portal at a machine that isn't yours. Must be reachable **from the portal container**: `host.docker.internal:8085` on Linux (the portal's Compose file maps it), the machine's LAN IP on Docker Desktop |
+| `WEBHOOK_TARGET_URL` | Defaults to `http://host.docker.internal:8085/devportal/events`, which is right when the portal container maps that name (Step 3). On Docker Desktop, pass the machine's LAN IP instead. It must be reachable **from the portal container**, not from your shell |
 | `IS_INTERNAL_URL` | The key manager's token-endpoint host, as reachable **from the portal container** |
 | `ORG_ADMIN_PASSWORD` / `ORG_USER_PASSWORD` | Optional — pin the passwords instead of getting fresh random ones on every run |
 
@@ -1219,7 +1329,7 @@ each get an admin **and** a subscriber — you onboard those live during the dem
 ## Step 11 — Run the demo
 
 The platform is now in the state
-[`API_Platform_Demo/README.md`](../API_Platform_Demo/README.md) calls its prerequisite. Follow
+[`README.md`](README.md) calls its prerequisite. Follow
 it from Step 1. In summary:
 
 1. **Walk the catalog** — Publisher and the portal's `public` org show the same five artifacts.
@@ -1356,7 +1466,7 @@ curl -sk -X POST https://is.wso2.com:9444/oauth2/token \
 In the browser:
 
 - [ ] Admin portal → **Gateways** → `<GATEWAY_NAME>` reads **Active**
-- [ ] Publisher lists all five seeded artifacts
+- [ ] Publisher lists the three seeded REST APIs (the two MCP proxies stay gateway-side)
 - [ ] Portal `public` org lists the same five, and `publicadmin` can log in through IS
 - [ ] Logging out of the portal returns you to the portal, not an IS error page
 
@@ -1380,6 +1490,10 @@ In the browser:
 | `502` from OrderManagementAPI | That org's mock backend isn't running, or the API's upstream URL still points at the old demo host's IP (Step 5.2) |
 | AgentChatAPI never returns `429` | Send `X-Org-Name: railco\|acme` — matched case-sensitively. Gateway logging `Rate limit key not found for cost extraction` means no quota matched, so nothing is counted |
 | `Could not create the Java Virtual Machine` starting API Manager | JDK below 21. Set `JAVA_HOME` to a 21+ JDK |
+| `404` from `https://am.wso2.com:9443/oauth2/token`, and API Manager's own log shows `Error while deploying webapp: StandardContext[oauth2.war]` / `Missing context.xml: [jar:file:…WK+Demo…]` | **A space in the installation path.** Carbon encodes it as `+` in a `jar:file:` URL and `oauth2.war` never deploys, so no DCR token can be minted. Move the pack to a space-free path, or start it through a symlink that has none |
+| `service "api-portal" depends on undefined service "platform-api": invalid compose project` | `platform-api` was dropped from `COMPOSE_PROFILES` but `api-portal` still declares `depends_on: platform-api`. Delete that block (Step 9.3) |
+| Portal logs `Bearer token validation failed … no applicable key found in the JSON Web Key Set`, and `onboard-tenant.sh` reports `401: Authentication required` for every API and MCP server | IS is signing org-scoped tokens with a per-organization key that the configured `jwks_url` does not serve — see [Step 10](#step-10--onboard-the-public-tenant) |
+| Every portal REST call returns `403 Forbidden` with a token whose signature verifies | Role/identity mapping, not scopes: the token's `roles` claim isn't reaching `[api_portal.auth.authorization.portal_roles]`. Check that the claim mappings survived app sharing, and that the org names in the token match the portal's organization |
 | Publisher's **Policies** tab is empty for a platform-gateway API | That page reads the remote Policy Hub and needs outbound internet from your **browser** |
 | Postman multipart upload sends nothing | Working directory not set, or the file reference went stale — re-select the files on the Body tab |
 | IS refuses to create an org you deleted earlier | IS never frees a deleted organization's name. Use `ORG_NAME=acme-demo SAMPLE_DIR=acme` |
@@ -1388,10 +1502,10 @@ In the browser:
 
 ## Config completeness audit
 
-**Is `demo/resources/` enough to stand this up from zero? No — it is five of the roughly
+**Is `setup/resources/` enough to stand this up from zero? No — it is five of the roughly
 twelve pieces of configuration.** Here is the full inventory.
 
-### What `demo/resources/` covers
+### What `setup/resources/` covers
 
 | File | Status |
 |---|---|
@@ -1399,7 +1513,8 @@ twelve pieces of configuration.** Here is the full inventory.
 | `gateway/api-platform.env` | **Complete as a template.** Correct keys, all values stripped — fill in from Steps 2 and 4.1 |
 | `gateway/config.toml` | **Complete as a template.** `<IS-HOST>:<PORT>` placeholders in the key-manager block are the only edits |
 | `subscription-mediator/.env` | **Complete as a template.** Four empty keys |
-| `api-portal/config.toml` | **Complete but carries live secrets.** The `[api_portal.auth.idp]` block holds the original deployment's real `client_id`/`client_secret` and its hostnames. Replace all of them with your own from Step 8 — treat that file as leaked credentials, not as a template |
+| `api-portal/docker-compose.yaml` | **Complete.** Names the custom image, drops `platform-api` and its `depends_on`, sets the TLS and log-level environment. Add `is.wso2.com` to `extra_hosts` |
+| `api-portal/config.toml` | **Complete as a template.** The `[api_portal.auth.idp]` block carries `<ROOT_APP_CLIENT_ID>` / `<ROOT_APP_CLIENT_SECRET>` placeholders — fill them from Step 8's output. Every other value is already correct for the demo hostnames |
 
 ### What is missing and must be created by hand
 
@@ -1407,22 +1522,21 @@ twelve pieces of configuration.** Here is the full inventory.
 |---|---|---|
 | **API Manager `deployment.toml`** | `wso2am-4.7.0/repository/conf/` | Not in `resources/` at all. Needs `[server] hostname = "am.wso2.com"` and `[apim.platform_gateway] versions = [...]` — see Step 1.1. (`cleanup-apim.sh` expects one at `backup/apim/deployment.toml`, which does not exist in this checkout either) |
 | **`extra_hosts` entries in both Compose files** | gateway and portal `docker-compose.yaml` | Containers do not inherit the host's `/etc/hosts`; without these the gateway can't reach `am.wso2.com` and the portal can't reach `is.wso2.com`. See Section 3 |
-| **`NODE_TLS_REJECT_UNAUTHORIZED: "0"`** | portal `docker-compose.yaml` | The portal container otherwise rejects IS's self-signed cert during the token exchange |
-| **`COMPOSE_PROFILES=api-portal`** | portal `.env` | Keeps the unused `platform-api` sidecar out of the stack in IdP mode |
+| **`COMPOSE_PROFILES=api-portal`** | portal `.env` | Keeps the unused `platform-api` sidecar out of the stack in IdP mode. The `.env` is generated by `setup.sh`, so this edit is always yours to make |
 | **Custom-policy build inputs** | gateway `policies/dynamic-routing/` + `build.yaml` | The policy source lives in `API_Platform_Demo/order-management-dynamic-routing/policy/`, not in `resources/`. Copy it in and add the `filePath:` entry — Step 3 |
 | **Custom image names in `docker-compose.yaml`** | gateway Compose | The shipped file names stock images; after Step 3 it must name your `<IMAGE_NAME>-gateway-{controller,runtime}:1.2.0` |
 | **`/etc/hosts` entries** | the host | Four hostnames pointed at `127.0.0.1`. Not captured anywhere in `resources/` |
+| **`is.wso2.com` in the portal's `extra_hosts`** | portal `docker-compose.yaml` | This repo's copy maps only `host.docker.internal`; the container must also resolve IS by name |
+| **A space-free installation path** | wherever the packs are unpacked | A space in `CARBON_HOME` stops `oauth2.war` deploying, which kills `/oauth2/token` |
 
 ### Values hard-coded to the original demo host — fix before reuse
 
 | Location | Hard-coded value | Consequence if left |
 |---|---|---|
-| `API_Platform_Demo/agent-chat-rate-limiting/AgentChatAPI-v1.0.yaml` | `url: http://77.112.16.220:7094` | AgentChatAPI proxies to a machine that isn't yours → `502`, and no rate-limit demo |
-| `API-Platform-Demo-Gateway-Management-Postman-Collection.json` | `77.112.16.220` in several request bodies | Same, for whatever you deploy from Postman |
-| `scripts/onboard-tenant.sh` | `WEBHOOK_TARGET_URL` defaults to `http://77.112.16.220:8085/devportal/events` | Every subscription webhook is delivered to the wrong host; the gateway silently never learns about any subscription. **Always pass `WEBHOOK_TARGET_URL` explicitly** |
-| `scripts/onboard-tenant.sh` | `WEBHOOK_SECRET` has a baked-in default | A silent mismatch with your mediator → every delivery rejected. Always pass it |
+| `agent-chat-rate-limiting/AgentChatAPI-v1.0.yaml`, `order-management-dynamic-routing/OrderManagementAPI-v1.0.yaml`, `API-Platform-Demo-Gateway-Management-Postman-Collection.json` | *(fixed)* these carried the original demo host's IP; they now use `host.docker.internal` | Substitute your LAN IP on Docker Desktop (Step 5.2) |
+| `scripts/onboard-tenant.sh` | *(fixed)* `WEBHOOK_TARGET_URL` now defaults to `http://host.docker.internal:8085/devportal/events`; it used to be the original demo host's IP | Override it on Docker Desktop, where that name does not reach the host |
+| `scripts/onboard-tenant.sh` | *(fixed)* `WEBHOOK_SECRET` had a baked-in default secret; it is now required and the script exits immediately without one | Pass the value you generated in Step 6 |
 | `scripts/onboard-tenant.sh`, `setup_idp.sh` | `IS_URL`/`IS_INTERNAL_URL` default to `https://is.wso2.com:9444` | Harmless *if* you keep the demo hostnames; wrong otherwise |
-| `demo/commands.md` | EC2 hostnames, key paths, and a set of IS/tenant credentials | Historical record of the original transfer, not reusable config |
 
 ### Runtime prerequisites that are not files at all
 
@@ -1433,16 +1547,26 @@ twelve pieces of configuration.** Here is the full inventory.
   servers are catalog-only.
 - **Docker images** for the gateway must be built locally (Step 3) — `docker compose pull`
   alone is not enough once `build.yaml` names a `filePath` policy.
+- **AgentChatAPI's gateway definition is not in the `public` bundle.** `seed-gateway.sh`
+  deploys four artifacts; the fifth is deployed by naming
+  `agent-chat-rate-limiting/AgentChatAPI-v1.0.yaml` explicitly (Step 5.3).
+- **A fresh WSO2 IS 7.3.0 blocks tenant onboarding** through per-organization token signing
+  keys — see [Step 10](#step-10--onboard-the-public-tenant). This is the one step of this
+  guide that has not been completed end to end on a clean install.
 - **Postman SSL verification off**, and its working directory pointed at `API_Platform_Demo`.
 
 ### Secrets hygiene
 
-`demo/commands.md`, `API_Platform_Demo/Demo-setup-steps.txt` and
-`demo/resources/api-portal/config.toml` all contain **live credentials** from the original
-deployment — client secrets, tenant admin passwords, the webhook secret, gateway registration
-tokens. They are useful as worked examples of the shape of each value, and they should all be
-rotated (or the deployment torn down) before this tree goes anywhere public. Nothing in this
-guide depends on any of them.
+Everything this repository ships is placeholders: `setup/resources/` carries no real client
+id, secret, password or token.
+
+`Demo-setup-steps.txt` is the exception — it holds real client ids, secrets and generated user
+passwords from an actual run, which is why `.gitignore` excludes it. Keep it that way, and
+rotate anything that has ever appeared in it.
+
+Every credential this guide produces — the gateway admin password, the registration token, the
+DCR client secret, the webhook secret, each tenant's client secret and its users' passwords —
+is generated at setup time and belongs only to your own deployment.
 
 ---
 
@@ -1469,22 +1593,27 @@ curl -s -X DELETE -u '<GW_ADMIN_USERNAME>:<GW_ADMIN_PASSWORD>' \
   http://platform.gw.wso2.com:9090/api/management/v1/rest-apis/OrderManagementAPI-v1.0
 ```
 
-**Reset API Manager** — stops it, deletes `setup/wso2am-4.7.0` (H2 database,
-Solr indexes, every API/application/subscription), restores the pristine copy from `backup/`,
-and drops the demo `deployment.toml` back in:
+**Reset API Manager or Identity Server** — both keep all their state inside the unpacked
+pack (embedded H2 database, Solr indexes, logs), so a reset is: stop the server, delete the
+directory, re-extract the zip from `~/demo/backup/`, and re-apply its `deployment.toml`
+(Steps 1.1 and 7.1):
 
 ```bash
-cd ~/demo
-./cleanup-apim.sh            # -y to skip the prompt, --dry-run to preview
+cd ~/demo/setup/wso2am-4.7.0 && ./bin/api-manager.sh stop     # or wso2is-7.3.0/bin/wso2server.sh stop
+rm -rf ~/demo/setup/wso2am-4.7.0
+unzip -q -o ~/demo/backup/wso2am-4.7.0.zip -d ~/demo/setup/
 ```
 
-**Reset the portal, gateway, mediator and IS** — `docker compose down -v` on all three stacks (containers,
-volumes, networks; images are kept), prunes what's left, and restores IS from `backup/`:
+**Reset the containerised stacks** — from each of the three distribution directories
+(gateway, portal, mediator):
 
 ```bash
-cd ~/demo
-./cleanup-api-portal-gateway.sh      # --skip-is / --skip-docker to do only half
+docker compose down -v      # -v also drops the volumes: gateway DB, portal DB, mediator state
+docker compose up -d
 ```
+
+`down` without `-v` keeps the data. Images are never touched, so the custom gateway image you
+built in Step 3 survives.
 
 After a full reset, resume from **Step 1**. The old registration token no longer matches
 anything, so regenerate it from the gateway's row in Admin → Gateways (or delete and re-add

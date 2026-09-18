@@ -175,6 +175,7 @@ command -v openssl >/dev/null 2>&1 || fail "openssl is required but not found on
 [ -n "${ROOT_APP_CLIENT_ID:-}" ] || fail "ROOT_APP_CLIENT_ID is required — the root-org API Portal application's client ID."
 [ -n "${ROOT_APP_CLIENT_SECRET:-}" ] || fail "ROOT_APP_CLIENT_SECRET is required."
 [ -n "${ROOT_APP_ID:-}" ] || fail "ROOT_APP_ID is required — the root-org API Portal application's id (not its client ID)."
+[ -n "${WEBHOOK_SECRET:-}" ] || fail "WEBHOOK_SECRET is required — it must equal the subscription-mediator's SM_WEBHOOK_SECRET."
 
 # Per-tenant artifact bundles live under artifacts/via-script/ — one
 # directory per organization ("public", "acme", "railco"), each holding the
@@ -713,8 +714,11 @@ fi
 # on this org's IS identity at all).
 
 WEBHOOK_SUBSCRIBER_ID="${WEBHOOK_SUBSCRIBER_ID:-subscription-mediator}"
-WEBHOOK_TARGET_URL="${WEBHOOK_TARGET_URL:-http://77.112.16.220:8085/devportal/events}"
-WEBHOOK_SECRET="${WEBHOOK_SECRET:-09hIFqDrvaJcc2Dx9EOT15HxXqPeZ067/YH2T0vkmHoIjHM/tQ65IpY6XERE1UrJ}"
+WEBHOOK_TARGET_URL="${WEBHOOK_TARGET_URL:-http://host.docker.internal:8085/devportal/events}"
+# No default: a baked-in secret is both a credential in version control and a silent
+# mismatch waiting to happen — the mediator rejects every delivery signed with the wrong
+# one, and the portal never retries.
+WEBHOOK_SECRET="${WEBHOOK_SECRET:-}"
 
 log "Registering webhook subscriber '$WEBHOOK_SUBSCRIBER_ID' for '$ORG_NAME' ..."
 EXISTING_WH_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
