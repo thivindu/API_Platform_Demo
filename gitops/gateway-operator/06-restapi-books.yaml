@@ -1,0 +1,15 @@
+apiVersion: gateway.api-platform.wso2.com/v1alpha1
+kind: RestApi
+metadata:
+  name: books-api
+  namespace: default
+spec:
+  displayName: Books API
+  version: v1.0
+  context: /books
+  upstream:
+    main:
+      url: https://httpbin.org/anything
+  operations:
+    - method: GET
+      path: /list
