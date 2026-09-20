@@ -1,0 +1,18 @@
+# Second RestApi CR, created purely to test the ArgoCD pipeline picking up a
+# brand-new resource (not just an edit to an existing one) -- the more
+# representative case for deploying real APIs later.
+apiVersion: gateway.api-platform.wso2.com/v1alpha1
+kind: RestApi
+metadata:
+  name: demo-api-2
+  namespace: default
+spec:
+  displayName: demo-api-2
+  version: v1.0
+  context: /demo2
+  upstream:
+    main:
+      url: https://httpbin.org/anything
+  operations:
+    - method: GET
+      path: /status
