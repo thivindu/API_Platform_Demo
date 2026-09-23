@@ -1,0 +1,15 @@
+# Real credentials — never commit. verify.sh reads this file and exits 2 without
+# it. Copy verify.env.example and fill it in; every value rotates on a re-setup.
+verify.env
+
+# Real Datadog API key. Copy datadog/datadog.env.example to datadog/datadog.env
+# and fill in DD_API_KEY; the collector's env_file points at the real name.
+datadog/datadog.env
+
+# Local backups left by editing scripts in place
+*.bak
+*.orig
+*.pre-*
+
+# macOS junk
+.DS_Store

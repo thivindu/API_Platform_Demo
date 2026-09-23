@@ -1,0 +1,49 @@
+# Prometheus scrape config for the WSO2 API Platform Gateway 1.2.1 demo stack.
+#
+# NOTE ON TARGETS: the distribution ships this file with targets named
+# `policy-engine:9003` and `router:9901`. Those service names do not exist in
+# the Docker Compose topology — Compose defines only `gateway-controller` and
+# `gateway-runtime`, and the runtime container hosts BOTH the Envoy router and
+# the policy engine. Scraping the shipped names yields a permanently DOWN
+# target. The targets below use the real Compose service names.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Gateway controller — [controller.metrics] port 9091
+  - job_name: 'gateway-controller'
+    static_configs:
+      - targets: ['gateway-controller:9091']
+        labels:
+          component: gateway-controller
+    metrics_path: /metrics
+
+  # Policy engine — [policy_engine.metrics] port 9003, inside the runtime container.
+  # This is the job that carries the analytics publisher series
+  # (policy_engine_analytics_*), so Moesif vs OTel delivery is visible here.
+  - job_name: 'policy-engine'
+    static_configs:
+      - targets: ['gateway-runtime:9003']
+        labels:
+          component: policy-engine
+    metrics_path: /metrics
+
+  # NO `router` JOB. The docs and the shipped prometheus.yml both scrape Envoy
+  # at 9901/stats/prometheus, and docker-compose.yaml publishes 9901 — but this
+  # distribution never enables Envoy's admin listener. Inside the runtime
+  # container Envoy listens on 8080 and 8443 only (verified with netstat), and
+  # config-template.toml exposes no switch to turn the admin interface on. A
+  # `router` job here would sit permanently DOWN, so it is deliberately omitted.
+  # Envoy's request-level data still reaches you via traffic logging and the
+  # analytics/tracing pipelines.
+
+  # The OpenTelemetry Collector's own health/throughput metrics. Tells you
+  # whether records/spans reached the collector and whether an exporter
+  # (datadog, otlp/jaeger) is failing to send them onward.
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888']
+        labels:
+          component: otel-collector
+    metrics_path: /metrics

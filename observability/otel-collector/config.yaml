@@ -1,0 +1,80 @@
+# OpenTelemetry Collector — base pipeline (no Datadog).
+#
+# Two signals arrive here from the gateway:
+#   * TRACES — from [tracing] in the gateway config.toml, OTLP/gRPC on 4317.
+#   * LOGS   — from the `otel` analytics publisher
+#              ([analytics.publishers.otel]), OTLP/HTTP on 4318 at /v1/logs.
+#              Each record is one API transaction, scope `wso2.analytics`,
+#              event.name `wso2.api.transaction`.
+#
+# A collector WITHOUT a `logs` pipeline accepts the connection and silently
+# discards every analytics record — the single most common cause of "exports
+# succeed but nothing appears downstream". The logs pipeline below is what the
+# distribution's shipped config is missing.
+#
+# Select this file (the default) or config-datadog.yaml with OTEL_COLLECTOR_CONFIG
+# in the gateway stack's .env.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  resource:
+    attributes:
+      - key: cluster
+        value: wk-demo
+        action: upsert
+      # `insert`, not `upsert`: the gateway sets deployment.environment itself
+      # under [tracing.resource_attributes]. upsert would overwrite it.
+      - key: deployment.environment
+        value: demo
+        action: insert
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  debug:
+    # `normal` prints one summary line per batch. `detailed` dumps every span
+    # and every analytics record in full — invaluable when proving the pipeline
+    # works, but the dump goes to the collector's stdout, which Fluent Bit then
+    # ships to OpenSearch. On this stack `detailed` was ~1900 log docs for 5
+    # API calls. Switch to detailed only while troubleshooting.
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/jaeger, debug]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      # Bind on all interfaces so Prometheus can scrape the collector itself.
+      # The default binds localhost, which is unreachable from another container.
+      address: 0.0.0.0:8888

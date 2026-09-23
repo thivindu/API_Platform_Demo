@@ -1,0 +1,136 @@
+# OpenTelemetry Collector — Datadog pipeline.
+#
+# Identical to config.yaml, plus the `datadog` exporter on BOTH signals:
+#   * traces → Datadog APM
+#   * logs   → Datadog Logs (this is where the gateway's analytics events land)
+#
+# TWO REQUIREMENTS, both easy to miss:
+#
+#  1. IMAGE. The `datadog` exporter ships only in the *contrib* distribution.
+#     `otel/opentelemetry-collector` (core, which the gateway's own
+#     docker-compose.yaml names) does NOT contain it and will fail at startup
+#     with "unknown type: datadog". The Compose service must use
+#     `otel/opentelemetry-collector-contrib`.
+#
+#  2. API KEY. DD_API_KEY must be set, or the collector refuses to start.
+#     It is read from verify-work/observability/datadog/datadog.env.
+#
+# Select this file with OTEL_COLLECTOR_CONFIG=config-datadog.yaml in the
+# gateway stack's .env.
+
+receivers:
+  # Traffic-logging file sink. The policy engine writes one JSON line per request
+  # to this file (traffic_logging.outputs = ["stdout","file"]); the collector
+  # tails it and ships it to Datadog Logs alongside the analytics records.
+  # The file is mode 0600 owned by uid 10001 and this image runs as 10001, so it
+  # is readable without loosening permissions.
+  filelog/traffic:
+    include: [/var/log/wso2/traffic/traffic.log]
+    # `end`, not `beginning`: the receiver keeps its file offset only in memory,
+    # so `beginning` re-ships the ENTIRE file to Datadog on every collector
+    # restart (158 duplicate lines the first time this was tried). `end` costs
+    # you only the lines written while the collector was down.
+    start_at: end
+    operators:
+      # Promote the JSON line's fields to log attributes so api.name, status,
+      # latencies.* and properties.* are individually searchable in Datadog
+      # rather than one opaque string.
+      - type: json_parser
+        parse_from: body
+
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  # Traffic logs get their own service name so they are separable from the
+  # analytics records, which share this collector and exporter.
+  resource/traffic:
+    attributes:
+      - key: service.name
+        value: wk-demo-gateway-traffic
+        action: upsert
+      - key: deployment.environment.name
+        value: demo
+        action: upsert
+      - key: cluster
+        value: wk-demo
+        action: upsert
+
+  resource:
+    attributes:
+      - key: cluster
+        value: wk-demo
+        action: upsert
+      - key: deployment.environment
+        value: demo
+        action: insert
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  debug:
+    # `normal` prints one summary line per batch. `detailed` dumps every span
+    # and every analytics record in full — invaluable when proving the pipeline
+    # works, but the dump goes to the collector's stdout, which Fluent Bit then
+    # ships to OpenSearch. On this stack `detailed` was ~1900 log docs for 5
+    # API calls. Switch to detailed only while troubleshooting.
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  datadog:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE}
+      # Fail fast at startup on a bad key rather than silently dropping every
+      # export later.
+      fail_on_invalid_key: true
+    # Containers have no meaningful host identity; naming it explicitly keeps
+    # every signal grouped under one host in Datadog instead of a container id.
+    hostname: wk-demo-gateway
+    traces:
+      # The gateway already samples ([tracing] sampling_rate); leave Datadog's
+      # own ingestion sampling alone so the two do not compound.
+      trace_buffer: 100
+    logs:
+      dump_payloads: false
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/jaeger, datadog, debug]
+
+    # Analytics events (OTLP from the otel publisher)
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [datadog, debug]
+
+    # Traffic logs (tailed from the file sink)
+    logs/traffic:
+      receivers: [filelog/traffic]
+      processors: [memory_limiter, batch, resource/traffic]
+      exporters: [datadog, debug]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

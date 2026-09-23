@@ -1,0 +1,210 @@
+# WSO2 API Platform Gateway 1.2.1 — demo config.toml with full observability.
+#
+# SOURCE OF TRUTH. Copied to
+#   verify-work/setup/wso2apip-api-gateway-1.2.0/configs/config.toml
+# by verify-work/observability/apply.sh. Edit here, not there.
+#
+# Everything above the OBSERVABILITY banner is the demo's functional config,
+# unchanged from the pre-observability setup. Everything below it is new.
+
+[router]
+gateway_host = "*"
+
+[controller.server]
+gateway_id = '{{ env "APIP_GW_CONTROLLER_SERVER_GATEWAY_ID" "platform-gateway-id" }}'
+
+[controller.storage]
+type = '{{ env "APIP_GW_CONTROLLER_STORAGE_TYPE" "sqlite" }}'
+
+[controller.storage.sqlite]
+path = '{{ env "APIP_GW_CONTROLLER_STORAGE_SQLITE_PATH" "./data/gateway.db" }}'
+
+[controller.logging]
+level = '{{ env "APIP_GW_CONTROLLER_LOGGING_LEVEL" "info" }}'
+
+[controller.controlplane]
+host = '{{ env "APIP_GW_CONTROLLER_CONTROLPLANE_HOST" "" }}'
+token = '{{ env "APIP_GW_CONTROLLER_CONTROLPLANE_TOKEN" "" }}'
+insecure_skip_verify = '{{ env "APIP_GW_CONTROLLER_CONTROLPLANE_INSECURE_SKIP_VERIFY" "true" }}'
+gateway_name = '{{ env "APIP_GW_CONTROLLER_CONTROLPLANE_GATEWAY_NAME" "default" }}'
+apim_oauth2_client_id = '{{ env "APIP_GW_CONTROLLER_CONTROLPLANE_APIM_OAUTH2_CLIENT_ID" "" }}'
+apim_oauth2_client_secret = '{{ env "APIP_GW_CONTROLLER_CONTROLPLANE_APIM_OAUTH2_CLIENT_SECRET" "" }}'
+
+[controller.policies]
+definitions_path = '{{ env "APIP_GW_CONTROLLER_POLICIES_DEFINITIONS_PATH" "./default-policies" }}'
+
+[controller.auth.basic]
+enabled = true
+
+[[controller.auth.basic.users]]
+username        = '{{ env "APIP_GW_CONTROLLER_AUTH_BASIC_ADMIN_USERNAME" "" }}'
+password        = '{{ env "APIP_GW_CONTROLLER_AUTH_BASIC_ADMIN_PASSWORD_HASH" "" }}'
+password_hashed = true
+roles           = ["admin"]
+
+[policy_engine.logging]
+level = "info"
+
+
+# =============================================================================
+# 1. TRAFFIC LOGGING  (docs: observability/traffic-logging)
+# =============================================================================
+# Envoy's own access log. One text line per request on the ROUTER's stdout.
+# Separate from [traffic_logging] below and much thinner — no API identity, no
+# consumer identity, no headers.
+[router.access_logs]
+enabled = true
+
+# The shared capture pipeline. It has no on/off switch: it activates whenever
+# a consumer (analytics OR traffic_logging) is enabled. Both consumers read
+# from this one capture, so enabling a header here is what makes it available
+# to the traffic log AND to the OTel analytics records.
+#
+# Bodies stay off. Every demo request carries a bearer token and order/chat
+# payloads; capturing them would put them in the container log and ship them to
+# Datadog. Flip them on deliberately if you want to demo payload capture.
+[collector]
+request_headers = true
+response_headers = true
+request_body = false
+response_body = false
+# Enforced by Envoy itself via an access-log filter, so the policy engine never
+# sees these at all. Keeps health probes and metric scrapes out of both the
+# traffic log and the analytics stream.
+ignore_path_prefixes = ["/health", "/metrics"]
+
+# The structured consumer: one JSON line per request, including requests an
+# auth policy rejected before any downstream logic ran (a 401 on a demo API
+# still produces a line — that is the thing Envoy's access log cannot show you
+# with API identity attached).
+[traffic_logging]
+enabled = true
+# Additive sinks. `file` requires gateway >= 1.2.0.2 — on base 1.2.0 this key
+# does not exist and startup fails, which is one reason this stack runs 1.2.1.
+outputs = ["stdout", "file"]
+# Redacted as "****" in requestHeaders/responseHeaders. The demo's bearer
+# tokens and subscription keys would otherwise be in plain text in every line.
+masked_headers = ["authorization", "x-api-key", "x-jwt-assertion", "subscription-key"]
+max_payload_size = 4096
+request_headers = true
+response_headers = true
+request_body = false
+response_body = false
+exclude_fields = []
+
+[traffic_logging.file]
+path = "/var/log/wso2/traffic/traffic.log"
+max_size_mb = 100
+
+# Demo-specific enrichment. `$ctx:` values are CEL against the collected event.
+# X-Org-Name is what dynamic-routing and advanced-ratelimit key on, so putting
+# it on the log line makes the multi-tenant demo legible in the log itself.
+[traffic_logging.properties]
+env = "wk-demo"
+apiName = "$ctx:api.name"
+orgName = "$ctx:request.header['x-org-name']"
+useCaseId = "$ctx:request.header['x-use-case-id']"
+subject = "$ctx:auth.subject != '' ? auth.subject : 'anonymous'"
+
+
+# =============================================================================
+# 2. TRACING  (docs: observability/tracing)
+# =============================================================================
+# Exports spans over OTLP/gRPC to the collector, which fans them out to Jaeger
+# and (with the Datadog config selected) to Datadog APM.
+# sampling_rate 1.0 = every request. Correct for a demo; lower it for real
+# traffic.
+[tracing]
+enabled = true
+endpoint = "otel-collector:4317"
+insecure = true
+service_version = "1.2.1"
+batch_timeout = "1s"
+max_export_batch_size = 512
+sampling_rate = 1.0
+
+
+# =============================================================================
+# 3. METRICS  (docs: observability/metrics)
+# =============================================================================
+# Each component serves Prometheus format on its own port. Envoy's
+# /stats/prometheus on 9901 is always on and needs no flag here.
+[controller.metrics]
+enabled = true
+port = 9091
+
+[policy_engine.metrics]
+enabled = true
+port = 9003
+
+
+# =============================================================================
+# 4. ANALYTICS  (docs: analytics/opentelemetry-analytics, analytics/moesif-analytics)
+# =============================================================================
+# Publishers are additive and independent — neither can fail the other.
+# `otel` is on; add "moesif" to enabled_publishers once you have a Moesif
+# application id (see [analytics.publishers.moesif] below). An unknown name
+# here is a startup error, not a silent no-op.
+[analytics]
+enabled = true
+enabled_publishers = ["otel"]
+
+# Requires gateway >= 1.2.0.11 (this stack runs 1.2.1). Exports every analytics
+# event as an OTLP *log record* — logs, not metrics or traces, because only a
+# log record carries the whole transaction with its attributes intact.
+# Scope `wso2.analytics`, event.name `wso2.api.transaction`.
+[analytics.publishers.otel]
+endpoint = "http://otel-collector:4318/v1/logs"
+# Required for a plaintext http:// endpoint; without it startup fails. The
+# collector is on the Compose network, so plaintext is contained here.
+allow_insecure_transport = true
+service_name = "wk-demo-gateway-runtime"
+service_version = "1.2.1"
+compression = "gzip"
+batch_size = 100
+flush_interval = "5s"
+queue_capacity = 10000
+on_queue_full = "drop_new"
+timeout = "10s"
+max_retries = 3
+retry_backoff = "1s"
+retry_abort_queue_ratio = 0.5
+
+[analytics.publishers.otel.resource_attributes]
+"deployment.environment.name" = "demo"
+"service.namespace" = "wk-demo"
+
+# Not in enabled_publishers: Moesif is a SaaS account this demo does not have.
+# To turn it on: set APIP_GW_ANALYTICS_PUBLISHERS_MOESIF_APPLICATION_ID in
+# api-platform.env and change enabled_publishers to ["otel", "moesif"].
+# Left enabled with a placeholder id, every event fails to publish and shows up
+# as policy_engine_analytics_dropped_total{publisher="moesif"}.
+[analytics.publishers.moesif]
+application_id = '{{ env "APIP_GW_ANALYTICS_PUBLISHERS_MOESIF_APPLICATION_ID" "<your-moesif-application-id>" }}'
+moesif_base_url = "https://api.moesif.net"
+publish_interval = 5
+event_queue_size = 10000
+batch_size = 50
+timer_wakeup_seconds = 3
+
+
+# =============================================================================
+# JWT key managers (demo functional config — unchanged)
+# =============================================================================
+[policy_configurations.jwtauth_v1]
+
+[[policy_configurations.jwtauth_v1.keymanagers]]
+name = "IS-railco"
+issuer = "https://is.wso2.com:9444/oauth2/token"
+
+[policy_configurations.jwtauth_v1.keymanagers.jwks.remote]
+uri = "https://is.wso2.com:9444/oauth2/jwks"
+skipTlsVerify = true
+
+[[policy_configurations.jwtauth_v1.keymanagers]]
+name = "IS-acme"
+issuer = "https://is.wso2.com:9444/oauth2/token"
+
+[policy_configurations.jwtauth_v1.keymanagers.jwks.remote]
+uri = "https://is.wso2.com:9444/oauth2/jwks"
+skipTlsVerify = true
