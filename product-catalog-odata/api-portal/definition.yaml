@@ -1,0 +1,298 @@
+openapi: 3.0.1
+info:
+  title: Product Catalog API
+  version: v1.0
+  description: |
+    An OData v4 Product Catalog. Two entity sets, `Products` and
+    `Suppliers`, with a navigation property from a product to its supplier.
+
+    This is a genuine OData service, so it accepts more URL shapes than
+    OpenAPI can express. The gateway routes everything under the base path
+    to the backend via a catch-all, including shapes not listed below:
+    `/Products(2)/Name` (property access), `/Products(2)/Supplier`
+    (navigation) and the service document at `/`.
+
+    Keys go in parentheses, OData style: `/Products(2)`, not `/Products/2`.
+
+    No authentication is required.
+servers:
+  - url: http://localhost:8080/product-catalog/v1.0
+components:
+  parameters:
+    Filter:
+      name: $filter
+      in: query
+      description: >
+        Subset supported by this service: `<prop> <op> <literal>` where op
+        is one of eq, ne, gt, ge, lt, le, joined by a single `and`/`or`,
+        plus `contains(prop,'text')` and `startswith(prop,'text')`.
+        Anything else returns 501 rather than being silently ignored.
+      schema: { type: string }
+      example: "Category eq 'Parts'"
+    Select:
+      name: $select
+      in: query
+      description: Comma-separated properties to return.
+      schema: { type: string }
+      example: ID,Name
+    Expand:
+      name: $expand
+      in: query
+      description: Navigation property to inline. Only `Supplier` is supported.
+      schema: { type: string, enum: [Supplier] }
+    OrderBy:
+      name: $orderby
+      in: query
+      description: Property, optionally followed by `asc` or `desc`.
+      schema: { type: string }
+      example: Price desc
+    Top:
+      name: $top
+      in: query
+      description: >
+        Maximum rows to return. Supplying it disables server-driven paging,
+        so no `@odata.nextLink` is emitted.
+      schema: { type: integer, minimum: 1 }
+    Skip:
+      name: $skip
+      in: query
+      description: Rows to skip before returning results.
+      schema: { type: integer, minimum: 0 }
+    Count:
+      name: $count
+      in: query
+      description: >
+        `true` adds `@odata.count`, the total after `$filter` but before
+        `$top`/`$skip`.
+      schema: { type: boolean }
+  schemas:
+    Product:
+      type: object
+      properties:
+        ID:         { type: integer, readOnly: true, example: 1 }
+        Name:       { type: string,  example: Brake Pad Set }
+        Price:      { type: number,  example: 49.99 }
+        Category:   { type: string,  example: Parts }
+        SupplierID: { type: integer, example: 1 }
+        Supplier:
+          allOf:
+            - $ref: '#/components/schemas/Supplier'
+          description: Present only when `$expand=Supplier` is used.
+    Supplier:
+      type: object
+      properties:
+        ID:   { type: integer, readOnly: true, example: 1 }
+        Name: { type: string,  example: Northwind Parts }
+        City: { type: string,  example: Colombo }
+    ProductCollection:
+      type: object
+      properties:
+        '@odata.context':
+          type: string
+          description: >
+            Absolute URL of the metadata document. Points at the gateway
+            when the backend is run with SERVICE_ROOT set; otherwise it
+            leaks the backend's own address.
+          example: http://localhost:8080/product-catalog/v1.0/$metadata#Products
+        '@odata.count':
+          type: integer
+          description: Present only when `$count=true`.
+          example: 5
+        '@odata.nextLink':
+          type: string
+          description: >
+            Absolute URL of the next page. Present only when more rows
+            remain and the caller did not supply `$top`.
+          example: http://localhost:8080/product-catalog/v1.0/Products?$skip=2
+        backend:
+          type: string
+          description: Which backend answered. A demo aid, not OData.
+          example: catalog_odata_backend
+        value:
+          type: array
+          items: { $ref: '#/components/schemas/Product' }
+    ODataError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:    { type: string, example: NotFound }
+            message: { type: string, example: Products(999) does not exist }
+paths:
+  /Products:
+    get:
+      summary: List products
+      operationId: listProducts
+      parameters:
+        - $ref: '#/components/parameters/Filter'
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Expand'
+        - $ref: '#/components/parameters/OrderBy'
+        - $ref: '#/components/parameters/Top'
+        - $ref: '#/components/parameters/Skip'
+        - $ref: '#/components/parameters/Count'
+      responses:
+        '200':
+          description: A page of products.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductCollection' }
+        '501':
+          description: A `$filter` expression outside the supported subset.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ODataError' }
+    post:
+      summary: Create a product
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [Name]
+              properties:
+                Name:       { type: string,  example: Coupling Rod }
+                Price:      { type: number,  example: 76.25 }
+                Category:   { type: string,  example: Parts }
+                SupplierID: { type: integer, example: 2 }
+      responses:
+        '201':
+          description: Created. The `Location` header holds the new entity's URL.
+          headers:
+            Location:
+              description: Absolute URL of the created product.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400':
+          description: Body is not valid JSON, or `Name` is missing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ODataError' }
+
+  '/Products({id})':
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Entity key, in OData parentheses form — `/Products(2)`.
+        schema: { type: integer }
+    get:
+      summary: Fetch a product by key
+      operationId: getProduct
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Expand'
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404':
+          description: No product with that key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ODataError' }
+    patch:
+      summary: Update a product
+      description: Partial update. `ID` is immutable and is ignored if sent.
+      operationId: updateProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                Name:       { type: string }
+                Price:      { type: number, example: 80.0 }
+                Category:   { type: string }
+                SupplierID: { type: integer }
+      responses:
+        '200':
+          description: The updated product.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404':
+          description: No product with that key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ODataError' }
+    delete:
+      summary: Delete a product
+      operationId: deleteProduct
+      responses:
+        '204':
+          description: Deleted. No body.
+        '404':
+          description: No product with that key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ODataError' }
+
+  /Suppliers:
+    get:
+      summary: List suppliers
+      operationId: listSuppliers
+      parameters:
+        - $ref: '#/components/parameters/Filter'
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/OrderBy'
+        - $ref: '#/components/parameters/Top'
+        - $ref: '#/components/parameters/Skip'
+        - $ref: '#/components/parameters/Count'
+      responses:
+        '200':
+          description: A page of suppliers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  '@odata.context': { type: string }
+                  value:
+                    type: array
+                    items: { $ref: '#/components/schemas/Supplier' }
+
+  '/Suppliers({id})':
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Fetch a supplier by key
+      operationId: getSupplier
+      responses:
+        '200':
+          description: The supplier.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Supplier' }
+        '404':
+          description: No supplier with that key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ODataError' }
+
+  /$metadata:
+    get:
+      summary: EDMX metadata document
+      description: >
+        The OData entity model, as XML. Note this is served through the
+        same catch-all as everything else, so it is reachable through the
+        gateway — restrict the operations in the API definition if you do
+        not want the model published.
+      operationId: getMetadata
+      responses:
+        '200':
+          description: The EDMX document.
+          content:
+            application/xml:
+              schema: { type: string }

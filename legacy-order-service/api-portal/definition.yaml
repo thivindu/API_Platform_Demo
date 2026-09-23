@@ -1,0 +1,292 @@
+openapi: 3.0.1
+info:
+  title: Legacy Order Service API
+  version: v1.0
+  description: |
+    A legacy SOAP Order Management service exposed as a plain JSON/REST
+    API. You send JSON and receive JSON; the gateway converts your request
+    into a SOAP envelope for the backend and converts the SOAP response
+    back into JSON.
+
+    Because the gateway builds the XML directly from your JSON, the request
+    and response bodies mirror the SOAP envelope: an `Envelope` object
+    containing a `Body` object containing one operation element. Use plain
+    unprefixed names -- the conversion is not namespace-aware, so a key
+    like `soap:Envelope` would be mangled rather than treated as a prefix.
+
+    Every operation is a POST, including the read operations: a GET has no
+    request body, so there would be nothing to convert into an envelope.
+
+    No authentication is required.
+servers:
+  - url: http://localhost:8080/legacy-order-service/v1.0
+components:
+  schemas:
+    Order:
+      type: object
+      description: An order as returned by the SOAP backend.
+      properties:
+        OrderId:
+          type: integer
+          description: >
+            Returned as a JSON number. XML is untyped text, so the
+            conversion coerces numeric-looking values -- the "1001" you
+            send comes back as 1001.
+          example: 1001
+        Customer:
+          type: string
+          example: Railco Logistics
+        Item:
+          type: string
+          example: Brake Pad Set
+        Quantity:
+          type: integer
+          example: 12
+        Status:
+          type: string
+          enum: [CREATED, CONFIRMED, SHIPPED]
+          example: CONFIRMED
+
+    NamespaceAttributes:
+      type: object
+      description: >
+        Namespace declarations from the SOAP envelope, surfaced as "@"
+        prefixed keys by the XML-to-JSON conversion. Informational only.
+      properties:
+        '@soap':
+          type: string
+          example: http://schemas.xmlsoap.org/soap/envelope/
+        '@ord':
+          type: string
+          example: http://wso2.com/demo/order-management
+
+    CreateOrderRequest:
+      type: object
+      required: [Envelope]
+      properties:
+        Envelope:
+          type: object
+          required: [Body]
+          properties:
+            Body:
+              type: object
+              required: [CreateOrder]
+              properties:
+                CreateOrder:
+                  type: object
+                  required: [Customer, Item, Quantity]
+                  properties:
+                    Customer:
+                      type: string
+                      example: Railco Logistics
+                    Item:
+                      type: string
+                      example: Brake Pad Set
+                    Quantity:
+                      type: integer
+                      minimum: 1
+                      example: 12
+
+    GetOrderRequest:
+      type: object
+      required: [Envelope]
+      properties:
+        Envelope:
+          type: object
+          required: [Body]
+          properties:
+            Body:
+              type: object
+              required: [GetOrder]
+              properties:
+                GetOrder:
+                  type: object
+                  required: [OrderId]
+                  properties:
+                    OrderId:
+                      type: string
+                      example: "1001"
+
+    ListOrdersRequest:
+      type: object
+      required: [Envelope]
+      properties:
+        Envelope:
+          type: object
+          required: [Body]
+          properties:
+            Body:
+              type: object
+              required: [ListOrders]
+              properties:
+                ListOrders:
+                  type: object
+                  description: Takes no parameters; send an empty object.
+                  additionalProperties: false
+
+    SingleOrderResponse:
+      type: object
+      properties:
+        Envelope:
+          allOf:
+            - $ref: '#/components/schemas/NamespaceAttributes'
+            - type: object
+              properties:
+                Body:
+                  type: object
+                  description: >
+                    Holds exactly one key, named after the SOAP operation:
+                    CreateOrderResponse or GetOrderResponse.
+                  additionalProperties:
+                    type: object
+                    properties:
+                      Backend:
+                        type: string
+                        description: Which backend answered.
+                        example: order_soap_backend
+                      Order:
+                        $ref: '#/components/schemas/Order'
+
+    ListOrdersResponse:
+      type: object
+      properties:
+        Envelope:
+          allOf:
+            - $ref: '#/components/schemas/NamespaceAttributes'
+            - type: object
+              properties:
+                Body:
+                  type: object
+                  properties:
+                    ListOrdersResponse:
+                      type: object
+                      properties:
+                        Backend:
+                          type: string
+                          example: order_soap_backend
+                        Orders:
+                          type: object
+                          properties:
+                            Order:
+                              type: array
+                              description: >
+                                Repeated <Order> elements become a JSON
+                                array. Note that a single result would come
+                                back as a bare object, not a one-element
+                                array.
+                              items:
+                                $ref: '#/components/schemas/Order'
+
+    SoapFault:
+      type: object
+      description: >
+        A SOAP Fault from the backend, converted to JSON. Returned with
+        HTTP 500.
+      properties:
+        Envelope:
+          allOf:
+            - $ref: '#/components/schemas/NamespaceAttributes'
+            - type: object
+              properties:
+                Body:
+                  type: object
+                  properties:
+                    Fault:
+                      type: object
+                      properties:
+                        faultcode:
+                          type: string
+                          example: soap:Client
+                        faultstring:
+                          type: string
+                          example: "Unknown operation: DeleteEverything"
+                        detail:
+                          type: object
+                          properties:
+                            Backend:
+                              type: string
+                              example: order_soap_backend
+
+paths:
+  /orders:
+    post:
+      summary: Create an order
+      description: Maps to the backend's `CreateOrder` SOAP operation.
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '200':
+          description: The order was created by the SOAP backend.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleOrderResponse'
+        '500':
+          description: >
+            A SOAP Fault from the backend, or a conversion error -- most
+            often a request sent without `Content-Type: application/json`,
+            which the mediator requires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoapFault'
+
+  /orders/get:
+    post:
+      summary: Fetch a single order
+      description: >
+        Maps to the backend's `GetOrder` SOAP operation. A POST rather than
+        a GET because the gateway builds the SOAP envelope from the request
+        body, and a GET has no body.
+      operationId: getOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetOrderRequest'
+      responses:
+        '200':
+          description: The requested order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleOrderResponse'
+        '500':
+          description: A SOAP Fault from the backend, or a conversion error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoapFault'
+
+  /orders/list:
+    post:
+      summary: List all orders
+      description: >
+        Maps to the backend's `ListOrders` SOAP operation. A POST rather
+        than a GET for the same reason as `/orders/get`.
+      operationId: listOrders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListOrdersRequest'
+      responses:
+        '200':
+          description: All orders held by the backend.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListOrdersResponse'
+        '500':
+          description: A SOAP Fault from the backend, or a conversion error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoapFault'

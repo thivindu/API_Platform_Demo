@@ -574,6 +574,11 @@ if [ -n "$ORG_USER_USERNAME" ]; then
         | jq -r '.access_token // empty')
     [ -n "$USER_TOKEN_CHECK" ] || fail "failed to obtain an access token for '$ORG_USER_USERNAME'."
 fi
+# The API Portal validates bearer tokens with ZERO clock tolerance on "nbf".
+# Its container clock can sit ~1s behind the host that IS runs on, so a token
+# used in the same second it was minted is rejected with
+#   401 {"code":401,"message":"Authentication required"}
+sleep 5
 log "  ${C_GREEN}${SYM_OK}${C_RESET} tokens acquired"
 
 # --- Step 3: seed subscription plans from subscription-plans.yaml -----------

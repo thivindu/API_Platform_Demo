@@ -1,0 +1,51 @@
+# API Portal manifest for ProductCatalogAPI-v1.0.
+#
+# BEFORE PUBLISHING: set `referenceId` to the REST API id the Platform API
+# assigns when this API is registered there. Like the SOAP demo next door,
+# this API has NO auth policy attached at the gateway, so there is no
+# security scheme to mirror here and no subscriptionPlans entry.
+#
+# Publish:
+#   curl -sk -X POST https://localhost:9543/api-portal/api/v0.9/apis \
+#     -H "Authorization: Bearer $TOKEN" \
+#     -F "metadata=@api-portal/api.yaml;type=application/yaml" \
+#     -F "definition=@api-portal/definition.yaml;type=application/yaml"
+apiVersion: api-portal.api-platform.wso2.com/v1
+kind: RestApi
+
+metadata:
+  name: product-catalog-api-v1-0
+
+spec:
+  type: REST
+  displayName: ProductCatalogAPI
+  version: v1.0
+  description: >
+    An OData v4 Product Catalog exposed through the gateway. Browse and
+    manage products and suppliers using standard OData query options --
+    $filter, $select, $expand, $orderby, $top, $skip and $count -- over
+    plain JSON. No payload conversion is involved: OData v4 is already
+    REST over HTTP with JSON payloads.
+  status: PUBLISHED
+  referenceId: REPLACE_WITH_PLATFORM_API_REST_API_ID
+
+  tags:
+    - product-catalog
+    - odata
+    - odata-v4
+    - passthrough
+
+  labels:
+    - default
+
+  agentVisibility: VISIBLE
+
+  businessInformation:
+    businessOwner: Platform Owner
+    businessOwnerEmail: support@example.com
+    technicalOwner: API Team
+    technicalOwnerEmail: architecture@example.com
+
+  endpoints:
+    sandboxUrl: http://localhost:8080/product-catalog/v1.0
+    productionUrl: http://localhost:8080/product-catalog/v1.0

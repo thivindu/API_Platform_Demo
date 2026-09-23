@@ -1,0 +1,52 @@
+# API Portal manifest for LegacyOrderServiceAPI-v1.0.
+#
+# BEFORE PUBLISHING: set `referenceId` to the REST API id the Platform API
+# assigns when this API is registered there. Unlike the other demo APIs,
+# this one has NO auth policy attached at the gateway -- it is an open
+# SOAP-to-REST proxy demo -- so there is no security scheme to mirror here
+# and no subscriptionPlans entry.
+#
+# Publish:
+#   curl -sk -X POST https://localhost:9543/api-portal/api/v0.9/apis \
+#     -H "Authorization: Bearer $TOKEN" \
+#     -F "metadata=@api-portal/api.yaml;type=application/yaml" \
+#     -F "definition=@api-portal/definition.yaml;type=application/yaml"
+apiVersion: api-portal.api-platform.wso2.com/v1
+kind: RestApi
+
+metadata:
+  name: legacy-order-service-api-v1-0
+
+spec:
+  type: REST
+  displayName: LegacyOrderServiceAPI
+  version: v1.0
+  description: >
+    A legacy SOAP Order Management service exposed as a plain JSON/REST
+    API. Callers send and receive JSON; the gateway converts each request
+    to a SOAP envelope and each SOAP response back to JSON using the
+    json-xml-mediator policy. The backend never sees JSON, and the caller
+    never sees XML.
+  status: PUBLISHED
+  referenceId: REPLACE_WITH_PLATFORM_API_REST_API_ID
+
+  tags:
+    - order-management
+    - soap
+    - soap-to-rest
+    - json-xml-mediator
+
+  labels:
+    - default
+
+  agentVisibility: VISIBLE
+
+  businessInformation:
+    businessOwner: Platform Owner
+    businessOwnerEmail: support@example.com
+    technicalOwner: API Team
+    technicalOwnerEmail: architecture@example.com
+
+  endpoints:
+    sandboxUrl: http://localhost:8080/legacy-order-service/v1.0
+    productionUrl: http://localhost:8080/legacy-order-service/v1.0

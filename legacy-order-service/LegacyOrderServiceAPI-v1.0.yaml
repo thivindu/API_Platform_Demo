@@ -1,0 +1,127 @@
+# LegacyOrderServiceAPI-v1.0 — exposes a legacy SOAP Order Management
+# service as a plain JSON/REST API. Callers speak JSON; the gateway speaks
+# SOAP/XML to the backend. Nothing else: no auth, no rate limiting, no
+# dynamic routing -- this API exists purely to demonstrate SOAP-to-REST
+# proxying via the json-xml-mediator policy.
+#
+# Three policies, each doing one job:
+#
+#   json-xml-mediator (v1.0.4)
+#     The whole point of this API. downsteamPayloadFormat: json /
+#     upstreamPayloadFormat: xml means the caller's JSON request body is
+#     converted to XML on the way to the backend, and the backend's XML
+#     response is converted back to JSON on the way out. (The parameter
+#     really is spelled "downsteam" -- that typo is in the policy's own
+#     schema, see /app/policies/json-xml-mediator-v1.0.4.yaml in the
+#     gateway-controller image. Using the correct spelling fails
+#     validation.)
+#
+#     Two things about the conversion, both verified against this gateway
+#     rather than assumed:
+#
+#     1. The generated XML is always wrapped in a synthetic <root> element,
+#        so the backend receives
+#          <root><Envelope><Body><GetOrder>...</GetOrder></Body></Envelope></root>
+#        This is NOT a strictly valid SOAP envelope -- Envelope has to be
+#        the document root. mock-soap-backend.js dispatches on the first
+#        child of <Body> (falling back to SOAPAction), so it accepts this;
+#        a strict SOAP stack such as Axis2 or .NET WCF would not. For a
+#        real legacy backend, put an interceptor-service or a custom
+#        policy after this one to unwrap <root>.
+#     2. The conversion is not namespace-aware. A JSON key containing a
+#        colon does not become a namespace prefix -- "soap:Envelope"
+#        becomes <soap_Envelope originalKey="soap:Envelope">, and "@xmlns"
+#        keys become elements, not attributes. So the envelope below is
+#        deliberately prefix-free and namespace-free.
+#
+#     The mediator requires the INCOMING Content-Type to be exactly
+#     application/json, and it rewrites the upstream Content-Type to
+#     application/xml itself. Do not set Content-Type with set-headers
+#     below: set-headers runs first, and overwriting the caller's
+#     application/json makes the mediator fail the request with
+#     500 "Content-Type must be application/json for downstream payload
+#     format json".
+#
+#   request-rewrite (v1.0.2)
+#     Every REST path is rewritten to the backend's single SOAP endpoint,
+#     /OrderService. Without this the backend would be called at /orders,
+#     /orders/get etc.
+#
+#   set-headers (v1.1.0), per operation
+#     Sets the SOAPAction header each SOAP operation expects. This is
+#     attached per-operation, not API-wide, because the value differs per
+#     operation -- it is what lets one REST path map to one SOAP
+#     operation.
+#
+# Because the envelope structure comes from the caller's JSON (no policy
+# here can synthesize it), each REST operation is a POST whose body mirrors
+# the SOAP envelope. See api-portal/definition.yaml for the exact schemas.
+#
+# Deploy (create — first time):
+#   curl -X POST "http://localhost:9090/api/management/v1/rest-apis" \
+#     -u "admin:<GW_ADMIN_PASSWORD>" -H "Content-Type: application/yaml" \
+#     --data-binary @LegacyOrderServiceAPI-v1.0.yaml
+#
+# Update (subsequent changes):
+#   curl -X PUT "http://localhost:9090/api/management/v1/rest-apis/LegacyOrderServiceAPI-v1.0" \
+#     -u "admin:<GW_ADMIN_PASSWORD>" -H "Content-Type: application/yaml" \
+#     --data-binary @LegacyOrderServiceAPI-v1.0.yaml
+#
+# Requires:
+#   - mock-services/mock-soap-backend.js  NAME=order_soap_backend PORT=7196
+apiVersion: gateway.api-platform.wso2.com/v1
+kind: RestApi
+metadata:
+  name: LegacyOrderServiceAPI-v1.0
+spec:
+  displayName: LegacyOrderServiceAPI
+  version: v1.0
+  context: /legacy-order-service/$version
+  upstream:
+    main:
+      url: http://host.docker.internal:7196   # mock-services/mock-soap-backend.js
+  policies:
+    # Policy versions are major-only here (v1). The gateway rejects a full
+    # semantic version: "policy version must be major-only (e.g., v1)".
+    - name: json-xml-mediator
+      version: v1
+      params:
+        downsteamPayloadFormat: json   # what the REST caller sends/receives
+        upstreamPayloadFormat: xml     # what the SOAP backend sends/receives
+    - name: request-rewrite
+      version: v1
+      params:
+        pathRewrite:
+          type: ReplaceFullPath
+          replaceFullPath: /OrderService
+  operations:
+    - method: POST
+      path: /orders
+      policies:
+        - name: set-headers
+          version: v1
+          params:
+            request:
+              headers:
+                - name: SOAPAction
+                  value: "http://wso2.com/demo/order-management/CreateOrder"
+    - method: POST
+      path: /orders/get
+      policies:
+        - name: set-headers
+          version: v1
+          params:
+            request:
+              headers:
+                - name: SOAPAction
+                  value: "http://wso2.com/demo/order-management/GetOrder"
+    - method: POST
+      path: /orders/list
+      policies:
+        - name: set-headers
+          version: v1
+          params:
+            request:
+              headers:
+                - name: SOAPAction
+                  value: "http://wso2.com/demo/order-management/ListOrders"

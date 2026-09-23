@@ -88,6 +88,18 @@
     {
       "key": "acme_order_management_subscription_key",
       "value": "REPLACE_WITH_ACME_ORDERMGMT_SUBSCRIPTION_KEY"
+    },
+    {
+      "key": "soap_backend_url",
+      "value": "http://localhost:7196"
+    },
+    {
+      "key": "odata_backend_url",
+      "value": "http://localhost:7194"
+    },
+    {
+      "key": "odata_last_product_id",
+      "value": ""
     }
   ],
   "item": [
@@ -1035,6 +1047,956 @@
             "description": "THE CONTRASTING DEMO POINT: unlike request 3 (Railco), this one is expected to return 429, not 200. Acme's usecase1 (50) + usecase2 (70, but only 100 actually consumed before blocking) budgets happen to sum to exactly Acme's org budget (150) -- 50 + 100 = 150. So once both named use-case quotas are individually exhausted, acme-org-token-budget is ALSO fully consumed, and this different/unnamed use-case gets blocked too (429, x-ratelimit-quota: acme-org-token-budget). Run this AFTER exhausting requests 4 and 5 above. This is a deliberate contrast with Railco (request 3): whether the org budget still has headroom after every named use-case is exhausted depends entirely on how the numbers are configured relative to each other -- it is not guaranteed, and Acme's current limits happen to leave zero room."
           },
           "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. LegacyOrderServiceAPI - SOAP behind REST",
+      "description": "A SOAP Order Management backend exposed as a JSON/REST API. Requests 1x call the SOAP backend DIRECTLY, bypassing the gateway; requests 2x call the same operations through the gateway as REST/JSON. Run a 1x and its matching 2x back to back -- that pairing is the demo.\n\nDeploy the API first with folder 4 of the Gateway Management collection, and start the backend:\n  NAME=order_soap_backend PORT=7196 node mock-soap-backend.js\n\nsoap_backend_url must be reachable from Postman. It is the backend's own address (default http://localhost:7196), NOT the gateway's.\n\nNo token is needed: this API has no auth policy attached.",
+      "item": [
+        {
+          "name": "1a. Backend direct - WSDL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{soap_backend_url}}/OrderService?wsdl=",
+              "host": [
+                "{{soap_backend_url}}"
+              ],
+              "path": [
+                "OrderService"
+              ],
+              "query": [
+                {
+                  "key": "wsdl",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "The backend's own WSDL, straight from the SOAP service. Proves the backend is up and shows the three operations the API maps onto."
+          }
+        },
+        {
+          "name": "1b. Backend direct - GetOrder (SOAP 1.1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/xml; charset=utf-8"
+              },
+              {
+                "key": "SOAPAction",
+                "value": "\"http://wso2.com/demo/order-management/GetOrder\""
+              }
+            ],
+            "url": {
+              "raw": "{{soap_backend_url}}/OrderService",
+              "host": [
+                "{{soap_backend_url}}"
+              ],
+              "path": [
+                "OrderService"
+              ]
+            },
+            "description": "Calls GetOrder as a real SOAP 1.1 client would: a full envelope, with the action in the SOAPAction header. Compare the XML response with the JSON from 2b -- same operation, same backend.",
+            "body": {
+              "mode": "raw",
+              "raw": "<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:ord=\"http://wso2.com/demo/order-management\">\n  <soapenv:Body>\n    <ord:GetOrder><ord:OrderId>1001</ord:OrderId></ord:GetOrder>\n  </soapenv:Body>\n</soapenv:Envelope>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "1c. Backend direct - ListOrders (SOAP 1.1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/xml; charset=utf-8"
+              },
+              {
+                "key": "SOAPAction",
+                "value": "\"http://wso2.com/demo/order-management/ListOrders\""
+              }
+            ],
+            "url": {
+              "raw": "{{soap_backend_url}}/OrderService",
+              "host": [
+                "{{soap_backend_url}}"
+              ],
+              "path": [
+                "OrderService"
+              ]
+            },
+            "description": "ListOrders takes no parameters. The response holds repeated <ord:Order> elements, which become a JSON array through the gateway (see 2c).",
+            "body": {
+              "mode": "raw",
+              "raw": "<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:ord=\"http://wso2.com/demo/order-management\">\n  <soapenv:Body><ord:ListOrders/></soapenv:Body>\n</soapenv:Envelope>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "1d. Backend direct - CreateOrder (SOAP 1.2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/soap+xml; charset=utf-8; action=\"http://wso2.com/demo/order-management/CreateOrder\""
+              }
+            ],
+            "url": {
+              "raw": "{{soap_backend_url}}/OrderService",
+              "host": [
+                "{{soap_backend_url}}"
+              ],
+              "path": [
+                "OrderService"
+              ]
+            },
+            "description": "SOAP 1.2 this time: the envelope uses the 1.2 namespace and the action rides inside Content-Type instead of its own SOAPAction header. The backend accepts both versions and picks by content type.",
+            "body": {
+              "mode": "raw",
+              "raw": "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:ord=\"http://wso2.com/demo/order-management\">\n  <soap:Body>\n    <ord:CreateOrder>\n      <ord:Customer>Railco Logistics</ord:Customer>\n      <ord:Item>Brake Pad Set</ord:Item>\n      <ord:Quantity>12</ord:Quantity>\n    </ord:CreateOrder>\n  </soap:Body>\n</soap:Envelope>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2a. Invoke via gateway - CreateOrder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway_base_url}}/legacy-order-service/v1.0/orders",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "legacy-order-service",
+                "v1.0",
+                "orders"
+              ]
+            },
+            "description": "POST /orders maps to the backend's CreateOrder. The gateway sets that operation's SOAPAction, rewrites the path to /OrderService, and json-xml-mediator converts this JSON body into XML on the way out and the SOAP response back into JSON on the way in.\n\nThe body mirrors the SOAP envelope because the envelope structure comes from the caller's JSON -- no policy can synthesize it. Use plain unprefixed names: the conversion is not namespace-aware.\n\nContent-Type MUST be application/json or the mediator rejects it with 500.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"Envelope\":{\"Body\":{\"CreateOrder\":{\"Customer\":\"Railco Logistics\",\"Item\":\"Brake Pad Set\",\"Quantity\":12}}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2b. Invoke via gateway - GetOrder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway_base_url}}/legacy-order-service/v1.0/orders/get",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "legacy-order-service",
+                "v1.0",
+                "orders",
+                "get"
+              ]
+            },
+            "description": "POST /orders/get maps to GetOrder. A POST rather than a GET because the gateway builds the SOAP envelope from the request body, and a GET has none.\n\nNote OrderId comes back as the JSON number 1001 rather than the string sent: XML is untyped text, so the conversion coerces numeric-looking values.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"Envelope\":{\"Body\":{\"GetOrder\":{\"OrderId\":\"1001\"}}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2c. Invoke via gateway - ListOrders",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway_base_url}}/legacy-order-service/v1.0/orders/list",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "legacy-order-service",
+                "v1.0",
+                "orders",
+                "list"
+              ]
+            },
+            "description": "POST /orders/list maps to ListOrders. The repeated <ord:Order> elements from 1c come back here as a JSON array under Orders.Order. A single result would come back as a bare object, not a one-element array.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"Envelope\":{\"Body\":{\"ListOrders\":{}}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2d. Invoke via gateway - SOAP Fault (expect 500)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([500]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway_base_url}}/legacy-order-service/v1.0/orders",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "legacy-order-service",
+                "v1.0",
+                "orders"
+              ]
+            },
+            "description": "An operation the backend does not implement. The backend answers with a SOAP Fault and HTTP 500, and the mediator converts the fault body to JSON like any other response -- so faults stay readable to a REST client.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"Envelope\":{\"Body\":{\"DeleteEverything\":{}}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. ProductCatalogAPI - OData passthrough",
+      "description": "An OData v4 catalog exposed through the gateway. Requests 1x call the OData service DIRECTLY; requests 2x call it through the gateway.\n\nThe contrast with folder 5 is the point: that API needs three policies to transcode SOAP, this one needs NONE. OData v4 is already REST over HTTP with JSON payloads, so the gateway only routes.\n\nDeploy the API with folder 4 of the Gateway Management collection, and start the backend with SERVICE_ROOT pointing at the GATEWAY:\n  SERVICE_ROOT=<gateway_base_url>/product-catalog/v1.0 \\\n    NAME=catalog_odata_backend PORT=7194 node mock-odata-backend.js\n\nWithout SERVICE_ROOT the service emits @odata.context and @odata.nextLink URLs pointing at the backend, so a client paging through results would leave the gateway entirely. Compare those URLs in 1c and 2c -- that difference is the demo.\n\nRun 2i before 2j and 2k: it captures the new entity key into odata_last_product_id, which they use.\n\nNo token is needed: this API has no auth policy attached.",
+      "item": [
+        {
+          "name": "1a. Backend direct - service document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{odata_backend_url}}",
+              "host": [
+                "{{odata_backend_url}}"
+              ],
+              "path": []
+            },
+            "description": "The OData service document, straight from the backend: the entity sets it publishes."
+          }
+        },
+        {
+          "name": "1b. Backend direct - $metadata",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{odata_backend_url}}/$metadata",
+              "host": [
+                "{{odata_backend_url}}"
+              ],
+              "path": [
+                "$metadata"
+              ]
+            },
+            "description": "The EDMX entity model as XML, straight from the backend."
+          }
+        },
+        {
+          "name": "1c. Backend direct - Products collection",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{odata_backend_url}}/Products",
+              "host": [
+                "{{odata_backend_url}}"
+              ],
+              "path": [
+                "Products"
+              ]
+            },
+            "description": "The Products collection. Look at @odata.context and @odata.nextLink: with SERVICE_ROOT unset they name the BACKEND, which is exactly the URL-leak problem. Compare with 2c."
+          }
+        },
+        {
+          "name": "1d. Backend direct - Products(2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{odata_backend_url}}/Products(2)",
+              "host": [
+                "{{odata_backend_url}}"
+              ],
+              "path": [
+                "Products(2)"
+              ]
+            },
+            "description": "A single entity by key. OData puts the key in parentheses -- /Products(2), not /Products/2."
+          }
+        },
+        {
+          "name": "2a. Invoke via gateway - service document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0"
+              ]
+            },
+            "description": "The service document through the gateway. Reached by the catch-all operation GET /* -- the API declares no path for it explicitly."
+          }
+        },
+        {
+          "name": "2b. Invoke via gateway - $metadata",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/$metadata",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "$metadata"
+              ]
+            },
+            "description": "The entity model through the gateway. Worth noting for security review: a catch-all publishes $metadata, so your whole entity model is reachable. Restrict the operations in the API definition if that is not wanted."
+          }
+        },
+        {
+          "name": "2c. Invoke via gateway - Products collection",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products"
+              ]
+            },
+            "description": "The collection through the gateway. With SERVICE_ROOT set, @odata.context and @odata.nextLink now name the GATEWAY -- so a client can follow @odata.nextLink and stay on the gateway. Compare with 1c."
+          }
+        },
+        {
+          "name": "2d. Invoke via gateway - Products(2) by key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products(2)",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products(2)"
+              ]
+            },
+            "description": "Entity by key. Proves the catch-all matches OData's parentheses key syntax, which a plain /{path} placeholder also would."
+          }
+        },
+        {
+          "name": "2e. Invoke via gateway - Products(2)/Supplier",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products(2)/Supplier",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products(2)",
+                "Supplier"
+              ]
+            },
+            "description": "A navigation property -- TWO path segments after the base. This is the request that proves the catch-all must be /* and not /{path}: a single-segment placeholder returns 404 here."
+          }
+        },
+        {
+          "name": "2f. Invoke via gateway - $filter + $select",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products?$filter=Category eq 'Parts'&$select=ID,Name",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products"
+              ],
+              "query": [
+                {
+                  "key": "$filter",
+                  "value": "Category eq 'Parts'"
+                },
+                {
+                  "key": "$select",
+                  "value": "ID,Name"
+                }
+              ]
+            },
+            "description": "OData query options need no gateway configuration at all -- they are ordinary query strings and pass through untouched."
+          }
+        },
+        {
+          "name": "2g. Invoke via gateway - $count + $orderby",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products?$count=true&$orderby=Price desc",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products"
+              ],
+              "query": [
+                {
+                  "key": "$count",
+                  "value": "true"
+                },
+                {
+                  "key": "$orderby",
+                  "value": "Price desc"
+                }
+              ]
+            },
+            "description": "@odata.count is the total AFTER $filter but BEFORE $top/$skip, per spec."
+          }
+        },
+        {
+          "name": "2h. Invoke via gateway - $expand",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products(3)?$expand=Supplier",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products(3)"
+              ],
+              "query": [
+                {
+                  "key": "$expand",
+                  "value": "Supplier"
+                }
+              ]
+            },
+            "description": "Inlines the related supplier into the product, rather than making the client follow the navigation property separately."
+          }
+        },
+        {
+          "name": "2i. Invoke via gateway - create product (POST)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201]);",
+                  "});",
+                  "",
+                  "// Hand the new entity key to the PATCH and DELETE requests below.",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set(\"odata_last_product_id\", pm.response.json().ID);",
+                  "    console.log(\"Captured odata_last_product_id =\", pm.response.json().ID);",
+                  "}",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products"
+              ]
+            },
+            "description": "Creates a product. Returns 201 with a Location header holding the new entity's URL -- which, like the other embedded URLs, names the gateway only when SERVICE_ROOT is set.\n\nThis request's test script captures the new ID into the collection variable odata_last_product_id, used by 2j and 2k.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"Name\":\"Coupling Rod\",\"Price\":76.25,\"Category\":\"Parts\",\"SupplierID\":2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2j. Invoke via gateway - update product (PATCH)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products({{odata_last_product_id}})",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products({{odata_last_product_id}})"
+              ]
+            },
+            "description": "Partial update of the product created by 2i. ID is immutable and is ignored if sent. Run 2i first, or set odata_last_product_id yourself.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"Price\":80.0}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2k. Invoke via gateway - delete product (DELETE)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Request completed\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([204]);",
+                  "});",
+                  "console.log(\"Status:\", pm.response.code, pm.response.status);",
+                  "console.log(\"Body:\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{gateway_base_url}}/product-catalog/v1.0/Products({{odata_last_product_id}})",
+              "host": [
+                "{{gateway_base_url}}"
+              ],
+              "path": [
+                "product-catalog",
+                "v1.0",
+                "Products({{odata_last_product_id}})"
+              ]
+            },
+            "description": "Deletes the product created by 2i. Returns 204 with no body. Running it twice returns 404 -- the second time it is already gone."
+          }
         }
       ]
     }

@@ -1,0 +1,96 @@
+# ProductCatalogAPI-v1.0 — exposes an OData v4 Product Catalog service as a
+# REST API on the gateway. Deliberately minimal: no auth, no rate limiting,
+# no dynamic routing.
+#
+# Unlike the SOAP demo next door (../legacy-order-service), this one needs
+# NO mediation policy at all. OData v4 is already REST over HTTP with JSON
+# payloads, so there is nothing to transcode -- the gateway's job here is
+# routing, and later whatever auth and quotas you choose to bolt on.
+#
+# THE ONE THING THAT MATTERS: the catch-all path.
+#
+#   OData URLs are open-ended. A client may ask for /Products,
+#   /Products(3), /Products(3)/Name, /Products(3)/Supplier, /$metadata, or
+#   the service document at /. You cannot enumerate them as operations.
+#
+#   Verified against this gateway (1.2.1):
+#     path: /*         -> TRUE multi-segment catch-all. Matches
+#                         /Products(3)/Supplier. This is what OData needs.
+#     path: /{path}    -> single segment ONLY. /Products(3) matches but
+#                         /Products(3)/Name returns 404. Not enough.
+#     path: /Products({id})
+#                      -> works and is templated, but you would have to
+#                         enumerate every shape. Use it only if you want to
+#                         deliberately restrict the surface (see below).
+#
+#   So each HTTP method is declared once against /*.
+#
+# Query options ($filter, $select, $expand, $top, $skip, $orderby, $count)
+# need no configuration whatsoever -- they are ordinary query strings and
+# pass through untouched.
+#
+# SECURITY NOTE ON /*: a catch-all exposes the WHOLE OData service,
+# including $metadata (which publishes your entity model) and every entity
+# set the backend serves. That is usually what you want for an OData proxy
+# and is why it is the default here. To restrict it instead, replace the
+# /* operations with explicit ones -- e.g. only
+#   - { method: GET, path: /Products }
+#   - { method: GET, path: /Products({id}) }
+# -- and the rest of the service stops being reachable through the gateway.
+#
+# THE URL-LEAK PROBLEM, and why it is fixed in the backend and not here:
+#
+#   OData responses embed ABSOLUTE URLs -- @odata.context, @odata.nextLink,
+#   Location on create. By default they name the BACKEND, so a client that
+#   follows @odata.nextLink to page through results would leave the gateway
+#   entirely, or fail if the backend is not reachable from its network.
+#
+#   No stock policy rewrites a response BODY. host-rewrite only sets the
+#   upstream Host request header, which is a different thing. The fix is to
+#   tell the OData service its own public root, which every real OData
+#   stack supports (SAP Gateway, Apache Olingo, WCF Data Services) and the
+#   mock here takes as SERVICE_ROOT:
+#
+#     SERVICE_ROOT=http://localhost:8080/product-catalog/v1.0 \
+#     NAME=catalog_odata_backend PORT=7194 node mock-odata-backend.js
+#
+#   If a backend genuinely cannot be told its public root, the only
+#   remaining option is an interceptor-service on the response phase
+#   (includeResponseBody: true) rewriting the URLs -- a network hop on
+#   every response and a service you have to run. Prefer SERVICE_ROOT.
+#
+# Deploy (create — first time):
+#   curl -X POST "http://localhost:9090/api/management/v1/rest-apis" \
+#     -u "admin:<GW_ADMIN_PASSWORD>" -H "Content-Type: application/yaml" \
+#     --data-binary @ProductCatalogAPI-v1.0.yaml
+#
+# Update (subsequent changes):
+#   curl -X PUT "http://localhost:9090/api/management/v1/rest-apis/ProductCatalogAPI-v1.0" \
+#     -u "admin:<GW_ADMIN_PASSWORD>" -H "Content-Type: application/yaml" \
+#     --data-binary @ProductCatalogAPI-v1.0.yaml
+#
+# Requires:
+#   - mock-services/mock-odata-backend.js  NAME=catalog_odata_backend PORT=7194
+apiVersion: gateway.api-platform.wso2.com/v1
+kind: RestApi
+metadata:
+  name: ProductCatalogAPI-v1.0
+spec:
+  displayName: ProductCatalogAPI
+  version: v1.0
+  context: /product-catalog/$version
+  upstream:
+    main:
+      url: http://host.docker.internal:7194   # mock-services/mock-odata-backend.js
+  # No policies. OData v4 is already JSON/REST; nothing needs mediating.
+  operations:
+    # GET covers the service document, $metadata, collections, entities by
+    # key, property access and navigation properties -- every read shape.
+    - method: GET
+      path: /*
+    - method: POST
+      path: /*
+    - method: PATCH
+      path: /*
+    - method: DELETE
+      path: /*
