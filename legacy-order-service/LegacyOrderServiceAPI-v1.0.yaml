@@ -83,45 +83,6 @@ spec:
   policies:
     # Policy versions are major-only here (v1). The gateway rejects a full
     # semantic version: "policy version must be major-only (e.g., v1)".
-    - name: json-xml-mediator
-      version: v1
-      params:
-        downsteamPayloadFormat: json   # what the REST caller sends/receives
-        upstreamPayloadFormat: xml     # what the SOAP backend sends/receives
-    - name: request-rewrite
-      version: v1
-      params:
-        pathRewrite:
-          type: ReplaceFullPath
-          replaceFullPath: /OrderService
   operations:
     - method: POST
-      path: /orders
-      policies:
-        - name: set-headers
-          version: v1
-          params:
-            request:
-              headers:
-                - name: SOAPAction
-                  value: "http://wso2.com/demo/order-management/CreateOrder"
-    - method: POST
-      path: /orders/get
-      policies:
-        - name: set-headers
-          version: v1
-          params:
-            request:
-              headers:
-                - name: SOAPAction
-                  value: "http://wso2.com/demo/order-management/GetOrder"
-    - method: POST
-      path: /orders/list
-      policies:
-        - name: set-headers
-          version: v1
-          params:
-            request:
-              headers:
-                - name: SOAPAction
-                  value: "http://wso2.com/demo/order-management/ListOrders"
+      path: /*
